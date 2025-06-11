@@ -67,7 +67,8 @@ class BaseModel(torch.nn.Module, ABC):
         ...
 
     def fit(self,
-            dataset: IterableDataset,
+            train_dataset: IterableDataset,
+            test_dataset: Optional[IterableDataset],
             optimizer: Optimizer,
             loss_function: Optional[Callable]=None,
             epochs: int = 1,
@@ -76,14 +77,17 @@ class BaseModel(torch.nn.Module, ABC):
         """
         A basic training loop.
         """
-        dataloader = DataLoader(dataset, batch_size=batch_size)
-        dataloader_iter = iter(dataloader)
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size)
+        train_dataloader_iter = iter(train_dataloader)
+        test_dataloader = DataLoader(test_dataset, batch_size=batch_size)
 
         self.train()
         device = torch.device(device)
+        losses = {'train': [], 'test': []}
+
         with tqdm.trange(epochs) as tqdm_bar:
             for epoch in tqdm_bar:
-                batch = next(dataloader_iter)
+                batch = next(train_dataloader_iter)
                 train_loss = train_step(
                     model=self,
                     batch=batch,
@@ -93,12 +97,16 @@ class BaseModel(torch.nn.Module, ABC):
                 )
                 test_loss = test_eval(
                     model=self,
-                    dataset=dataset,
+                    dataloader=test_dataloader,
                     loss_function=loss_function,
                     device=device
                 )
+                losses['train'].append(train_loss)
+                losses['test'].append(test_loss)
                 tqdm_bar.set_postfix_str(f"loss: {train_loss:.2e}, test_loss: {test_loss:.2e}")
-
+        
+        return losses
+    
     def datastream_predict(self, *args, **kwargs):
         raise NotImplementedError("Data stream prediction method must be implemented by subclasses.")
 

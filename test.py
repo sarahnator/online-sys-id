@@ -45,7 +45,7 @@ basis_functions = BasisFunctions(
 )
 
 model = FunctionEncoder(basis_functions).to(device)
-model.load_state_dict(torch.load("van_der_pol_model.pth", map_location=device))
+model.load_state_dict(torch.load("./logs/VanDerPol_NODE_FE/model.pth", map_location=device))
 
 
 # Evaluate model

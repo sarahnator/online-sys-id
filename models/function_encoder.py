@@ -91,3 +91,17 @@ class FunctionEncoder(BaseModel):
         if self.residual_function is not None:
             y = y + self.residual_function(x)
         return y
+
+    # def integrate_trajectory(model: torch.nn.Module, y0: torch.Tensor, dt: torch.Tensor, **ode_kwargs) -> torch.Tensor:
+    #     """Integrate the trajectory of a neural ODE model using a specified time step.
+
+    #     Args:
+    #         model (torch.nn.Module): The neural ODE model.
+    #         y0 (torch.Tensor): Initial condition for the ODE.
+    #         dt (torch.Tensor): Time step for integration.
+    #         ode_kwargs (dict, optional): Additional arguments for the ODE function.
+
+    #     Returns:
+    #         torch.Tensor: The state of the system after one time step.
+    #     """
+    #     return model((y0, dt), ode_kwargs=ode_kwargs)
