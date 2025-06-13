@@ -17,10 +17,11 @@ if __name__ == "__main__":
     parser.add_argument("--load_dir", type=str, default=None)
     parser.add_argument("--log_dir", type=str, default="logs")
     parser.add_argument("--n_basis", type=int, default=11)
-    parser.add_argument("--n_example_points", type=int, default=100)
-    parser.add_argument("--n_points", type=int, default=1000)
-    parser.add_argument("--algorithm", type=str, default="NODE_FE")
-    parser.add_argument("--epochs", type=int, default=1_000)
+    parser.add_argument("--n_example_points", type=int, default=500)
+    parser.add_argument("--n_points", type=int, default=500)
+    # parser.add_argument("--algorithm", type=str, default="NODE_FE")
+    parser.add_argument("--algorithm", type=str, default="MAML")
+    parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--dataset_name", type=str, default="VanDerPol")
     parser.add_argument("--n_params", type=int, default=int(1e6))
     parser.add_argument("--n_layers", type=int, default=6)
@@ -82,7 +83,7 @@ else:
 
 # train
 loss_function = get_loss_function(algorithm=algorithm)
-losses = model.fit(
+losses = model._train(
     train_dataset=train_dataset,
     test_dataset=test_dataset,
     optimizer=optimizer,
@@ -104,10 +105,16 @@ if load_dir is None:
     log_dir = f"{log_dir}/{dataset_name}_{algorithm}"
     save_path = f"{log_dir}/model.pth"
 
+    # writer = SummaryWriter(log_dir=log_dir)
+    # for epoch, (train_loss, test_loss) in enumerate(zip(losses['train'], losses['test'])):
+    #     writer.add_scalar("Loss/train", train_loss, epoch)
+    #     writer.add_scalar("Loss/test", test_loss, epoch)
+    # writer.close()
+
     writer = SummaryWriter(log_dir=log_dir)
-    for epoch, (train_loss, test_loss) in enumerate(zip(losses['train'], losses['test'])):
-        writer.add_scalar("Loss/train", train_loss, epoch)
-        writer.add_scalar("Loss/test", test_loss, epoch)
+    for loss_name, loss_values in losses.items():
+        for epoch, loss_value in enumerate(loss_values):
+            writer.add_scalar(f"Loss/{loss_name}", loss_value, epoch)
     writer.close()
 
     torch.save(model.state_dict(), save_path)

@@ -1,7 +1,6 @@
 from typing import Callable, Optional, Tuple, Dict
 import torch
 
-
 def rk4_step(func, x, dt, **ode_kwargs):
     """Runge-Kutta 4th order ODE integrator for a single step."""
     t = torch.zeros_like(dt, device=dt.device)

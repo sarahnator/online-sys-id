@@ -66,7 +66,7 @@ class BaseModel(torch.nn.Module, ABC):
         """Core forward pass."""
         ...
 
-    def fit(self,
+    def _train(self,
             train_dataset: IterableDataset,
             test_dataset: Optional[IterableDataset],
             optimizer: Optimizer,
