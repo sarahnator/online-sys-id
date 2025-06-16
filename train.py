@@ -2,6 +2,7 @@ import argparse
 import os
 
 from datetime import datetime
+from matplotlib import pyplot as plt
 import torch
 import time
 from torch.utils.tensorboard import SummaryWriter
@@ -20,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_example_points", type=int, default=500)
     parser.add_argument("--n_points", type=int, default=500)
     # parser.add_argument("--algorithm", type=str, default="NODE_FE")
-    parser.add_argument("--algorithm", type=str, default="MAML")
+    parser.add_argument("--algorithm", type=str, default="MAML2_NODE")
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--dataset_name", type=str, default="VanDerPol")
     parser.add_argument("--n_params", type=int, default=int(1e6))
@@ -104,12 +105,6 @@ if load_dir is None:
     
     log_dir = f"{log_dir}/{dataset_name}_{algorithm}"
     save_path = f"{log_dir}/model.pth"
-
-    # writer = SummaryWriter(log_dir=log_dir)
-    # for epoch, (train_loss, test_loss) in enumerate(zip(losses['train'], losses['test'])):
-    #     writer.add_scalar("Loss/train", train_loss, epoch)
-    #     writer.add_scalar("Loss/test", test_loss, epoch)
-    # writer.close()
 
     writer = SummaryWriter(log_dir=log_dir)
     for loss_name, loss_values in losses.items():

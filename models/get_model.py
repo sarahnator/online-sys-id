@@ -1,5 +1,5 @@
 from models.function_encoder import FunctionEncoder, BasisFunctions
-from models.maml import MAML
+from models.maml import MAML, MAML2, MAML2_NODE
 from architecture.mlp import MLP
 from architecture.neural_ode import NeuralODE, ODEFunc, rk4_step
 import torch
@@ -13,14 +13,14 @@ def get_loss_function(algorithm: str):
     Returns:
         Callable: The loss function to be used.
     """
-    if algorithm == 'NODE_FE':
+    if algorithm == 'NODE_FE' or algorithm == 'MAML2_NODE':
         return neural_ode_loss
-    elif algorithm == 'MAML':
+    elif algorithm == 'MAML' or algorithm == 'MAML2':
         return torch.nn.MSELoss()
     else:
         raise ValueError(f"Unknown model type: {algorithm}")
 
-def get_model(algorithm: str, n_layers:int, n_params: int, n_basis: int, device: str) -> torch.nn.Module:
+def get_model(algorithm: str, n_layers:int=0, n_params: int=0, n_basis: int=0, device: str='cpu') -> torch.nn.Module:
     """Get a model based on the specified type.
 
     Args:
@@ -31,7 +31,6 @@ def get_model(algorithm: str, n_layers:int, n_params: int, n_basis: int, device:
     Returns:
         torch.nn.Module: The initialized model.
     """
-
 
     if algorithm == 'NODE_FE':
         layer_sizes = [3, 64, 64, 2]  # Example layer sizes for MLP and NODE, adjust this later based on n_params
@@ -76,6 +75,27 @@ def get_model(algorithm: str, n_layers:int, n_params: int, n_basis: int, device:
         bias = True
         return MAML(
             model=MLP(layer_sizes=layer_sizes, activation=activation, bias=bias),
+            meta_learning_rate=1e-3,
+            internal_learning_rate=1e-3,
+        ).to(device)
+    elif algorithm == 'MAML2':
+        layer_sizes = [2, 64, 64, 2]  # Example layer sizes for MLP and NODE, adjust this later based on n_params
+        activation = torch.nn.ReLU()
+        bias = True
+        return MAML2(
+            model=MLP(layer_sizes=layer_sizes, activation=activation, bias=bias),
+            meta_learning_rate=1e-3,
+            internal_learning_rate=1e-3,
+        ).to(device)
+    elif algorithm == 'MAML2_NODE':
+        layer_sizes = [3, 64, 64, 2]  # Example layer sizes for MLP and NODE, adjust this later based on n_params
+        activation = torch.nn.ReLU()
+        bias = True
+        return MAML2_NODE(
+            model= NeuralODE(
+                    ode_func=ODEFunc(model=MLP(layer_sizes=layer_sizes, activation=activation, bias=bias)),
+                    integrator=rk4_step,
+                ),
             meta_learning_rate=1e-3,
             internal_learning_rate=1e-3,
         ).to(device)

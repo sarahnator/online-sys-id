@@ -6,8 +6,8 @@ from torch.utils.data import DataLoader
 
 from datasets.van_der_pol import VanDerPolDataset, van_der_pol
 
-from arch.mlp import MLP
-from arch.neural_ode import NeuralODE, ODEFunc, rk4_step
+from architecture.mlp import MLP
+from architecture.neural_ode import NeuralODE, ODEFunc, rk4_step
 from models.function_encoder import BasisFunctions, FunctionEncoder
 from util.training import train_step
 

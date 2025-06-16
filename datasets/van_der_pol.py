@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import IterableDataset
 import matplotlib.pyplot as plt
 
-from arch.neural_ode import rk4_step
+from architecture.neural_ode import rk4_step
 
 def van_der_pol(t, x, mu=1.0):
     x1 = x[..., 0]
@@ -106,6 +106,73 @@ class VanDerPolDataset(IterableDataset):
         plt.legend()
         plt.tight_layout()
         plt.show()
+
+    # def integrate_batch(self, y0s, dt, mu):
+    #     """
+    #     Integrate a batch of initial conditions and time steps using the Van der Pol oscillator dynamics.
+        
+    #     Args:
+    #         y0s (torch.Tensor): Initial conditions of shape (batch_size, 2).
+    #         dt (torch.Tensor): Time step of shape (batch_size,).
+    #         mu (float): The mu parameter of the Van der Pol oscillator.
+        
+    #     Returns:
+    #         torch.Tensor: Integrated states of shape (batch_size, 2).
+    #     """
+    #                 # Integrate the true trajectory
+    #         x = _y0.clone()
+    #         y = [x] # track all points in the trajectory
+    #         for k in range(n):
+    #             x = rk4_step(van_der_pol, x, _dt, mu=_mu) + x
+    #             y.append(x)
+    #         y = torch.cat(y, dim=0) # concatenate into a single tensor along the time dimension
+    #         y = y.detach().cpu().numpy()
+        
+
+
+
+    # def plot_vander_pol(y0s, yhats, dt, mu):
+    #     """
+    #     Plot the Van der Pol oscillator trajectories for a batch of initial conditions and predicted states.
+        
+    #     Args:
+    #         y0s (torch.Tensor): Initial conditions of shape (batch_size, 2).
+    #         yhat (torch.Tensor): Predicted states of shape (batch_size, 2).
+    #         dt (torch.Tensor): Time step of shape (batch_size,).
+    #         mu (float): The mu parameter of the Van der Pol oscillator.
+    #     """
+    #     import matplotlib.pyplot as plt
+
+    #     # Convert tensors to numpy for plotting
+    #     y0s = y0s.detach().cpu().numpy()
+    #     yhat = yhat.detach().cpu().numpy()
+
+    #     fig, ax = plt.subplots(figsize=(10, 10))
+    #     ax.set_title(f"Van der Pol Oscillator Trajectories with $\\mu$={mu.item():.2f}")
+    #     ax.set_xlim(-5, 5)
+    #     ax.set_ylim(-5, 5)
+
+    #     for i in range(len(y0s)):
+    #         # Integrate the Van der Pol oscillator for each initial condition
+    #         trajectory = [y0s[i]]
+    #         n_steps = int(10 / dt[i].item())
+    #         for _ in range(n_steps):
+    #             current_state = trajectory[-1]
+    #             change_in_state = rk4_step(van_der_pol, current_state, dt[i:i+1], mu=mu)
+    #             resulting_state = current_state + change_in_state
+    #             trajectory.append(resulting_state)
+    #         trajectory = torch.stack(trajectory, dim=0).detach().cpu().numpy()
+
+    #         # Plot the trajectory
+    #         ax.plot(trajectory[:, 0], trajectory[:, 1], label=f"Trajectory {i+1}")
+
+    #         # Plot the predicted state
+    #         ax.scatter(yhat[i, 0], yhat[i, 1], color='red', marker='x', label=f"Predicted {i+1}")
+
+    #     ax.set_xlabel("x1")
+    #     ax.set_ylabel("x2")
+    #     ax.legend()
+    #     plt.show()
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
