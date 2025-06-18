@@ -1,5 +1,5 @@
 from typing import Callable, Optional, Tuple, Union
-
+from util.losses import neural_ode_loss
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 from datasets.van_der_pol import *
 
 from models.get_model import get_model
-from models.maml import *
 import matplotlib.pyplot as plt
 
 import tqdm
@@ -27,8 +26,7 @@ dataloader = DataLoader(dataset, batch_size=50)
 dataloader_iter = iter(dataloader)
 
 # Create model
-# alg = 'MAML2_MLP'
-alg = 'MAML_MLP'
+alg = 'NODE'
 model = get_model(algorithm=alg, device=device)
 model.load_state_dict(torch.load(f"./logs/VanDerPol_{alg}/model.pth", map_location=device))
 model.loss_function = torch.nn.MSELoss()
@@ -36,19 +34,17 @@ model.optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 
 """
-Qualitative evaluation of the MAML model on a single example from the dataset.
+Qualitative evaluation.
 """
 
-# make predictions with the model
-# fine-tune on examples
 batch = next(dataloader_iter)
 y0, dt, y1, y0_example, dt_example, y1_example, info = batch
 y0=y0.to(device)
 y1=y1.to(device)
 dt=dt.to(device)
+dt_example = dt_example.to(device)
 y0_example = y0_example.to(device)
 y1_example = y1_example.to(device)
-adapted_weights, _ = model.inner_update_step(x=y0_example, y=y1_example) # note here we use the last parameter estimate generated from a growing dataset
 
 # Roll out the model on the batch of initial conditions
 # and compare to the ground truth trajectory
@@ -56,7 +52,7 @@ s = 0.1 # simulation time step
 n = int(10 / s)  # number of steps to simulate
 
 ground_truth_traj = [y0.clone()]
-maml_traj = [y0.clone()]
+node_traj = [y0.clone()]
 _dt = torch.tensor([s], device=device)  # time step for simulation
 for i in range(n):
     # ground truth trajectory
@@ -65,14 +61,16 @@ for i in range(n):
     resulting_state = current_state + change_in_state
     ground_truth_traj.append(resulting_state)
 
-    maml_state = maml_traj[-1]
-    maml_dstate = model.forward(x=maml_state, w=adapted_weights)
-    maml_prediction = maml_state + maml_dstate
-    maml_traj.append(maml_prediction)
+    node_state = node_traj[-1]
+    # expand _dt to match the batch size and number of points
+    expanded_dt = _dt.expand(node_state.shape[0], -1).expand(-1, node_state.shape[1])
+    node_dstate = model.forward(inputs=(node_state, expanded_dt))
+    node_prediction = node_state + node_dstate
+    node_traj.append(node_prediction)
 
 
 ground_truth_traj = torch.stack(ground_truth_traj, dim=0).detach().cpu().numpy()
-maml_traj = torch.stack(maml_traj, dim=0).detach().cpu().numpy()
+node_traj = torch.stack(node_traj, dim=0).detach().cpu().numpy()
 
 # Plot first 9 trajectories from the dataset
 fig, ax = plt.subplots(3, 3, figsize=(10, 10))
@@ -85,7 +83,7 @@ for i in range(3):
         ax[i, j].set_xlim(-5, 5)
         ax[i, j].set_ylim(-5, 5)
         (_t,) = ax[i, j].plot(ground_truth_traj[:, traj_idx, 0, 0], ground_truth_traj[:, traj_idx, 0, 1], color='blue', label='True')
-        (_m,) = ax[i, j].plot(maml_traj[:, traj_idx, 0, 0], maml_traj[:, traj_idx, 0, 1], color='orange', label='MAML')
+        (_m,) = ax[i, j].plot(node_traj[:, traj_idx, 0, 0], node_traj[:, traj_idx, 0, 1], color='orange', label='MAML')
 
 fig.legend(
     handles=[_t, _m],
@@ -98,16 +96,14 @@ fig.legend(
 # plt.show()
 # save the figure
 fig.savefig(f"./logs/VanDerPol_{alg}/qualitative_example.png", bbox_inches='tight')
-
+plt.close(fig)
 
 """
-Quantitative evaluation of the MAML model.
+Quantitative evaluation of the NODE model.
 """
 mu = torch.empty(1, device=device).uniform_(*dataset.mu_range) # random initial mu parameter
 plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
-losses_maml_with_meta_update = []
-losses_maml = []  # to store the losses for each step
-adapted_weights = model.copy_params(1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+losses_node = []  # to store the losses for each step
 with tqdm.trange(5000) as tqdm_bar:
     for step in tqdm_bar:
 
@@ -120,15 +116,8 @@ with tqdm.trange(5000) as tqdm_bar:
         y0 = torch.empty(1, 1, 2, device=device).uniform_(*dataset.y0_range)
         dt = torch.empty(1, 1, device=device).uniform_(*dataset.dt_range)
         y1 = rk4_step(van_der_pol, y0, dt, mu=mu)
-
-        # Compute the parameter estimate from data
-        # TODO: Not sure which method to use here, whether to perform a meta-update or not.
-        adapted_weights_maml_with_meta_update, _ = model.inner_update_step(x=y0, y=y1)
-        model.meta_update_step(
-            x=y0, y=y1, adapted_weights=adapted_weights_maml_with_meta_update, clip_grad_norm_=True  # take a meta step in the direction of the adapted weights
-        )
-
-        adapted_weights, _ = model.inner_update_step_from_params(x=y0, y=y1, params=adapted_weights)
+        
+        # adapted_weights, _ = model.inner_update_step(x=y0, dt=dt, y=y1)
 
         # Generate a new batch of data for evaluation
         n_points = 1000
@@ -136,54 +125,49 @@ with tqdm.trange(5000) as tqdm_bar:
         _dt = torch.empty(1, n_points, device=device).uniform_(*dataset.dt_range)
         _y1 = rk4_step(van_der_pol, _y0, _dt, mu=mu)
 
-        # Compute maml predictions
-        maml_pred = model.forward(x=_y0, w=adapted_weights)
-        loss_maml = torch.nn.functional.mse_loss(maml_pred, _y1)
-        losses_maml.append(loss_maml.item())
-
-        maml_pred_with_meta_update = model.forward(x=_y0, w=adapted_weights_maml_with_meta_update)
-        loss_maml_with_meta_update = torch.nn.functional.mse_loss(maml_pred_with_meta_update, _y1)
-        losses_maml_with_meta_update.append(loss_maml_with_meta_update.item())
-
+        # Compute node predictions with update on the single observation
+        pred, loss, adapted_weights = model.datastream_predict(xs=y0, dt=dt, ys=y1, query_xs=_y0, query_dt=_dt, query_ys=_y1)
+        # node_pred = model.forward((_y0, _dt), model_kwargs={'params': adapted_weights})
+        # loss = model.loss_function(node_pred, _y1)
+        
+        losses_node.append(loss.item())
 
         tqdm_bar.set_postfix(
             {
-                "loss_maml": f"{loss_maml.item():.2e}",
-                "loss_maml_with_meta_update": f"{loss_maml_with_meta_update.item():.2e}",
+                "loss_node": f"{loss.item():.2e}",
             }
         )
 
 # Plot the loss
 fig, ax = plt.subplots(1, 1, figsize=(10,10))
-# plot a vertical dashed line at every 1000 steps and label with the mu parameter
-for i in range(1, 6):
-    ax.axvline(x=(i - 1) * 1000, color='gray', linestyle='--', linewidth=0.5)
-    # label the line with the mu parameter
-    ax.text(
-        (i - 1) * 1000,
-        1e-3,
-        f"$\\mu$={plotting_mu[i-1]:.1f}",
-        rotation=90,
-        verticalalignment='bottom',
-        horizontalalignment='left',
-        fontsize=11,
-        # bold
-        fontweight='bold',
-    
-    )
 
+for i, m in enumerate(plotting_mu):
+    x = i * 1000
+    ax.axvline(x, color='gray', linestyle='--', linewidth=0.5)
+    ax.text(
+        x,               # data x
+        0.1,               # axis-fraction y = 0 (bottom of the plotting area)
+        f"$\\mu$={m:.1f}",
+        transform=ax.get_xaxis_transform(),  # <-- key!
+        rotation=90,
+        va='bottom',     # push the text upward from the axis spine
+        ha='left',
+        fontsize=11,
+        fontweight='bold',
+    )
+    
+# ax.set_yscale("log")
 ax.set_yscale("log")
-ax.plot(losses_maml, label="MAML Loss", color='orange')
-ax.plot(losses_maml_with_meta_update, label="MAML Loss (with meta-update)", color='blue')
+ax.minorticks_on()
+ax.grid(which="both", axis="y", linestyle=":", linewidth=0.5)
+ax.plot(losses_node, label="MAML NODE Loss", color='blue')
 plt.legend()
 plt.tight_layout()
 # plt.show()
 fig.savefig(f"./logs/VanDerPol_{alg}/losses.png", bbox_inches='tight')
 
 # save the losses
-losses_maml = torch.tensor(losses_maml, device=device)
-losses_maml_with_meta_update = torch.tensor(losses_maml_with_meta_update, device=device)
+losses_node = torch.tensor(losses_node, device=device)
 torch.save({
-    "losses_maml": losses_maml,
-    "losses_maml_with_meta_update": losses_maml_with_meta_update,
+    "losses_node": losses_node,
 }, f"./logs/VanDerPol_{alg}/losses.pth")

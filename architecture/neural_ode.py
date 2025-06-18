@@ -1,5 +1,6 @@
 from typing import Callable, Optional, Tuple, Dict
 import torch
+from models.BaseModel import BaseModel
 
 def rk4_step(func, x, dt, **ode_kwargs):
     """Runge-Kutta 4th order ODE integrator for a single step."""
@@ -22,48 +23,26 @@ class ODEFunc(torch.nn.Module):
         super(ODEFunc, self).__init__()
         self.model = model
 
-    def forward(self, t, x):
+    def forward(self, t, x, params=None):
         """Compute the time derivative at the current state.
 
         Args:
             t (torch.Tensor): Current time
             x (torch.Tensor): Current state
+            
 
         Returns:
             torch.Tensor: The time derivative dx/dt at the current state
         """
         tx = torch.cat([t.unsqueeze(-1), x], dim=-1)  # Concatenate time and state
-        return self.model(tx)
 
-    def forward(self, t, x, params):
-        """Compute the time derivative at the current state with additional parameters.
-        Forward pass with custom parameters for the underlying MLP.
-        Args:
-            t (torch.Tensor): Current time
-            x (torch.Tensor): Current state
-            params (torch.Tensor): Additional parameters
+        if params is None:
+            return self.model(tx)
+        else:
+            return self.model.forward_with_params(tx, params)
 
-        Returns:
-            torch.Tensor: The time derivative dx/dt at the current state
-        """
-        tx = torch.cat([t.unsqueeze(-1), x], dim=-1)
-        for i, layer in enumerate(self.model.layers[:-1]):
-            W, b = params[i]
-            # W has shape [batch_size, out_features, in_features]
-            # b has shape [batch_size, out_features]
-            # x has shape [batch_size, n_points, in_features]
-    
-            tx = torch.einsum("bmn,bdn->bdm", W, tx) + b.unsqueeze(1) # Ax+b , the bias is broad cast among the n_points dimension
-            tx = self.model.activation(tx) # apply activation function
-            # x = torch.nn.functional.linear(x, params[i][0], params[i][1])
-            # torch.nn.functional.linear does not support batch-wise parameters, so compute manually
-
-        # Apply the last layer without activation
-        W, b = params[-1]
-        tx = torch.einsum("bmn,bdn->bdm", W, tx) + b.unsqueeze(1)
-        return tx
-
-class NeuralODE(torch.nn.Module):
+class NeuralODE(BaseModel):
+# class NeuralODE(torch.nn.Module):
     """Neural Ordinary Differential Equation model.
 
     Args:
@@ -80,14 +59,14 @@ class NeuralODE(torch.nn.Module):
         self.ode_func = ode_func
         self.integrator = integrator
 
-        # alias
-        self.layers = self.ode_func.model.layers
+    @property
+    def layers(self):
+        return self.ode_func.model.layers
 
     def forward(
         self,
         inputs,
         ode_kwargs: Optional[Dict] = {},
-        model_kwargs: Optional[Dict] = {},
     ):
         """Solve the initial value problem.
 
@@ -100,8 +79,4 @@ class NeuralODE(torch.nn.Module):
         Returns:
             torch.Tensor: Solution of the ODE at the next time step.
         """
-        # return self.integrator(self.ode_func, *inputs, **ode_kwargs)
-        if model_kwargs is not None:
-            return self.integrator(self.ode_func, *inputs, params=model_kwargs.get('params'), **ode_kwargs)
-        else:
-            return self.integrator(self.ode_func, *inputs, **ode_kwargs)
+        return self.integrator(self.ode_func, *inputs, **ode_kwargs)

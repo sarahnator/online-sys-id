@@ -85,7 +85,8 @@ def neural_ode_loss(
         prediction = model((y0, dt), coefficients=coefficients)
     except Exception as e:
         # print(f"Error in computing coefficients: {e}")
-        prediction = model((y0, dt), y1)
+        # prediction = model((y0, dt), y1)
+        prediction = model((y0, dt))
 
     prediction_loss = torch.nn.functional.mse_loss(prediction, y1)
     return prediction_loss

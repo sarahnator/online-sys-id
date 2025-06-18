@@ -1,6 +1,5 @@
-from typing import List, Callable, Union, Tuple
+from typing import List, Callable, Union, Tuple, Mapping
 import torch
-
 
 class MLP(torch.nn.Module):
     """A simple multi-layer perceptron neural network.
@@ -19,12 +18,15 @@ class MLP(torch.nn.Module):
     ):
         super(MLP, self).__init__()
         self.layer_sizes = layer_sizes
-        self.activation = activation
-        self.layers = torch.nn.ModuleList()
-        for i in range(len(layer_sizes) - 1):
-            self.layers.append(
-                torch.nn.Linear(layer_sizes[i], layer_sizes[i + 1], bias=bias),
-            )
+        # Ensure activation is an nn.Module or callable
+        self.activation = activation if isinstance(activation, torch.nn.Module) else activation
+        
+        # Build linear layers
+        self.layers = torch.nn.ModuleList(
+            torch.nn.Linear(in_f, out_f, bias=bias)
+            for in_f, out_f in zip(layer_sizes[:-1], layer_sizes[1:])
+        )
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the MLP.
@@ -35,13 +37,13 @@ class MLP(torch.nn.Module):
         Returns:
             torch.Tensor: Output tensor [batch_size, ...]
         """
-        for layer in self.layers[:-1]:
+        for layer in self.layers[:-1]:  # Apply all but last layer with activation
             x = layer(x)
             x = self.activation(x)
-        x = self.layers[-1](x)
+        x = self.layers[-1](x)   # last layer without activation
         return x
 
-    def forward(self, x: torch.tensor, params: List[Tuple[torch.tensor, torch.tensor]]) -> torch.tensor:
+    def forward_with_params(self, x: torch.tensor, params: List[Tuple[torch.tensor, torch.tensor]]) -> torch.tensor:
         """Forward pass through the MLP with custom weights.
 
         Args:
@@ -66,3 +68,4 @@ class MLP(torch.nn.Module):
         W, b = params[-1]
         x = torch.einsum("bmn,bdn->bdm", W, x) + b.unsqueeze(1)
         return x
+

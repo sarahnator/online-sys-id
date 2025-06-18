@@ -90,6 +90,9 @@ cython_debug/
 .vscode/
 
 
-logs/
+# logs/
 
 *.pth
+
+# pytorch tensorboard event logs
+*events.out.tfevents.*
