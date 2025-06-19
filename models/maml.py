@@ -6,6 +6,27 @@ from itertools import islice
 from torch.optim import Optimizer
 import tqdm
 
+def copy_params(model: torch.nn.Module, num_copies: int) -> list:
+        # copy-paste of Tyler's code
+        # first generate models based on the current parameters
+        # this generates a new model for each example
+        params = []
+        layers = model.layers
+
+        for layer in layers:
+            if isinstance(layer, torch.nn.Linear):
+                W_copy = layer.weight.unsqueeze(0).expand(num_copies, -1, -1).clone()
+                b_copy = layer.bias.unsqueeze(0).expand(num_copies, -1,).clone()
+                params.append((W_copy, b_copy))
+            # elif isinstance(layer, torch.nn.Conv2d):
+            #     W_copy = layer.weight.unsqueeze(0).expand(num_copies, -1, -1, -1, -1).clone()
+            #     b_copy = layer.bias.unsqueeze(0).expand(num_copies, -1,).clone()
+            #     params.append((W_copy, b_copy))
+            else:
+                raise NotImplementedError("Layer type not supported in copy_params")
+
+        return params
+
 class MAML(BaseModel):
     def __init__(self, model, meta_learning_rate: float = 1e-3, internal_learning_rate: float = 1e-3):
         super().__init__()
@@ -26,40 +47,28 @@ class MAML(BaseModel):
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, output_dim).
         """
-        return self.model.forward_with_params(x, w)
+        return self.model.forward(x, w)
 
-    def copy_params(self, num_copies):
-        # copy-paste of Tyler's code
-        # first generate models based on the current parameters
-        # this generates a new model for each example
-        params = []
-        layers = self.model.layers
+    # def copy_params(self, num_copies):
+    #     # copy-paste of Tyler's code
+    #     # first generate models based on the current parameters
+    #     # this generates a new model for each example
+    #     params = []
+    #     layers = self.model.layers
 
-        for layer in layers:
-            if isinstance(layer, torch.nn.Linear):
-                W_copy = layer.weight.unsqueeze(0).expand(num_copies, -1, -1).clone()
-                b_copy = layer.bias.unsqueeze(0).expand(num_copies, -1,).clone()
-                params.append((W_copy, b_copy))
-            # elif isinstance(layer, torch.nn.Conv2d):
-            #     W_copy = layer.weight.unsqueeze(0).expand(num_copies, -1, -1, -1, -1).clone()
-            #     b_copy = layer.bias.unsqueeze(0).expand(num_copies, -1,).clone()
-            #     params.append((W_copy, b_copy))
-            else:
-                raise NotImplementedError("Layer type not supported in copy_params")
+    #     for layer in layers:
+    #         if isinstance(layer, torch.nn.Linear):
+    #             W_copy = layer.weight.unsqueeze(0).expand(num_copies, -1, -1).clone()
+    #             b_copy = layer.bias.unsqueeze(0).expand(num_copies, -1,).clone()
+    #             params.append((W_copy, b_copy))
+    #         # elif isinstance(layer, torch.nn.Conv2d):
+    #         #     W_copy = layer.weight.unsqueeze(0).expand(num_copies, -1, -1, -1, -1).clone()
+    #         #     b_copy = layer.bias.unsqueeze(0).expand(num_copies, -1,).clone()
+    #         #     params.append((W_copy, b_copy))
+    #         else:
+    #             raise NotImplementedError("Layer type not supported in copy_params")
 
-        return params
-
-    # def make_batched_state_dict(self, num_copies: int):
-    #     """
-    #     Returns a dict mapping every param/buffer name to a tensor of shape
-    #     [num_copies, *original_shape], so that we can use vmap + functional_call to evaluate the NN with custom parameters in batch.
-    #     """
-    #     sd = self.state_dict()
-    #     batched = {}
-    #     for k, v in sd.items():
-    #         # unsqueeze a new batch‐axis, expand & clone
-    #         batched[k] = v.unsqueeze(0).expand(num_copies, *v.shape).clone()
-    #     return batched
+    #     return params
     
     def meta_update_step(self,  x: torch.Tensor, y: torch.Tensor, adapted_weights: torch.Tensor, clip_grad_norm_: bool) -> torch.Tensor:
         """
@@ -99,7 +108,7 @@ class MAML(BaseModel):
         n_points = x.size(1)
         batch_size = x.size(0)
 
-        params = self.copy_params(batch_size)  # copy the parameters for each task in the batch
+        params = copy_params(self.model, batch_size)  # copy the parameters for each task in the batch
         # TODO: test accuracy pre-update. Should be random accuracy.
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
@@ -320,7 +329,7 @@ class MAML2(MAML):
 
         # extend params to (batch_size, parameter_size) so that we have a parameter update for each task (batch)
         # params = params.unsqueeze(0).expand(batch_size, -1, -1)
-        params = self.copy_params(batch_size)  # copy the parameters for each task in the batch
+        params = copy_params(self.model, batch_size)  # copy the parameters for each task in the batch
         # TODO: test accuracy pre-update. Should be random accuracy.
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
@@ -530,7 +539,7 @@ class MAML2_NODE(MAML2):
 
         # extend params to (batch_size, parameter_size) so that we have a parameter update for each task (batch)
         # params = params.unsqueeze(0).expand(batch_size, -1, -1)
-        params = self.copy_params(batch_size)  # copy the parameters for each task in the batch
+        params = copy_params(self.model, batch_size)  # copy the parameters for each task in the batch
         # TODO: test accuracy pre-update. Should be random accuracy.
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update

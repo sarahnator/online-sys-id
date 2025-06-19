@@ -1,5 +1,6 @@
 from typing import Callable, Optional, Tuple, Union
 from util.losses import neural_ode_loss
+from util.online_adapt import online_adapt_maml
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -104,11 +105,18 @@ Quantitative evaluation of the NODE model.
 mu = torch.empty(1, device=device).uniform_(*dataset.mu_range) # random initial mu parameter
 plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
 losses_node = []  # to store the losses for each step
-with tqdm.trange(5000) as tqdm_bar:
+losses_node_cumulative = []  # to store the losses of the cumulative version of maml for each step
+
+cumulative_data = []
+# set the update MAML parameters
+lr = 1e-3
+
+change_mu_every = 100  # update the mu parameter every 100 steps
+with tqdm.trange(500) as tqdm_bar:
     for step in tqdm_bar:
 
         # Update the mu parameter every 500 steps
-        if step % 1000 == 0 and step > 0:
+        if step % change_mu_every == 0 and step > 0:
             mu = torch.empty(1, device=device).uniform_(*dataset.mu_range)
             plotting_mu.append(mu.item())
 
@@ -117,7 +125,25 @@ with tqdm.trange(5000) as tqdm_bar:
         dt = torch.empty(1, 1, device=device).uniform_(*dataset.dt_range)
         y1 = rk4_step(van_der_pol, y0, dt, mu=mu)
         
-        # adapted_weights, _ = model.inner_update_step(x=y0, dt=dt, y=y1)
+        # Append the observation to the cumulative data
+        cumulative_data.append(((y0, dt), y1))
+        
+        adapted_params, loss, _ = online_adapt_maml(
+            model=model,
+            loss_fn=model.loss_function,
+            data_stream=[((y0, dt), y1)],  # single observation
+            lr=lr,
+            use_full_history=False,  # we only use the single observation
+        )
+
+        # Cumulative version of maml
+        cumulative_adapted_params, cumulative_loss, _ = online_adapt_maml(
+            model=model,
+            loss_fn=model.loss_function,
+            data_stream=cumulative_data,  # all observations so far
+            lr=lr,
+            use_full_history=True,  # we use all observations
+        )
 
         # Generate a new batch of data for evaluation
         n_points = 1000
@@ -126,15 +152,20 @@ with tqdm.trange(5000) as tqdm_bar:
         _y1 = rk4_step(van_der_pol, _y0, _dt, mu=mu)
 
         # Compute node predictions with update on the single observation
-        pred, loss, adapted_weights = model.datastream_predict(xs=y0, dt=dt, ys=y1, query_xs=_y0, query_dt=_dt, query_ys=_y1)
-        # node_pred = model.forward((_y0, _dt), model_kwargs={'params': adapted_weights})
-        # loss = model.loss_function(node_pred, _y1)
+        node_pred = model.forward((_y0, _dt), {'params': adapted_params})
+        loss = model.loss_function(node_pred, _y1)
+
+        # Compute node predictions with cumulative update
+        cumulative_node_pred = model.forward((_y0, _dt), {'params': cumulative_adapted_params})
+        cumulative_loss = model.loss_function(cumulative_node_pred, _y1)
         
         losses_node.append(loss.item())
+        losses_node_cumulative.append(cumulative_loss.item())
 
         tqdm_bar.set_postfix(
             {
                 "loss_node": f"{loss.item():.2e}",
+                "loss_node_cumulative": f"{cumulative_loss.item():.2e}",
             }
         )
 
@@ -142,7 +173,7 @@ with tqdm.trange(5000) as tqdm_bar:
 fig, ax = plt.subplots(1, 1, figsize=(10,10))
 
 for i, m in enumerate(plotting_mu):
-    x = i * 1000
+    x = i * change_mu_every
     ax.axvline(x, color='gray', linestyle='--', linewidth=0.5)
     ax.text(
         x,               # data x
@@ -161,6 +192,7 @@ ax.set_yscale("log")
 ax.minorticks_on()
 ax.grid(which="both", axis="y", linestyle=":", linewidth=0.5)
 ax.plot(losses_node, label="MAML NODE Loss", color='blue')
+ax.plot(losses_node_cumulative, label="MAML (cumulative data) NODE Loss", color='orange')
 plt.legend()
 plt.tight_layout()
 # plt.show()
@@ -168,6 +200,8 @@ fig.savefig(f"./logs/VanDerPol_{alg}/losses.png", bbox_inches='tight')
 
 # save the losses
 losses_node = torch.tensor(losses_node, device=device)
+losses_node_cumulative = torch.tensor(losses_node_cumulative, device=device)
 torch.save({
     "losses_node": losses_node,
+    "losses_node_cumulative": losses_node_cumulative,
 }, f"./logs/VanDerPol_{alg}/losses.pth")
