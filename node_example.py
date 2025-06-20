@@ -106,13 +106,15 @@ mu = torch.empty(1, device=device).uniform_(*dataset.mu_range) # random initial 
 plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
 losses_node = []  # to store the losses for each step
 losses_node_cumulative = []  # to store the losses of the cumulative version of maml for each step
+losses_node_window  = []  # to store the losses of the windowed version of maml for each step
 
 cumulative_data = []
 # set the update MAML parameters
 lr = 1e-3
+window = 50 # use a window of 50 steps for the windowed version of maml
 
-change_mu_every = 100  # update the mu parameter every 100 steps
-with tqdm.trange(500) as tqdm_bar:
+change_mu_every = 1000  # update the mu parameter every 100 steps
+with tqdm.trange(5000) as tqdm_bar:
     for step in tqdm_bar:
 
         # Update the mu parameter every 500 steps
@@ -145,6 +147,16 @@ with tqdm.trange(500) as tqdm_bar:
             use_full_history=True,  # we use all observations
         )
 
+        # Windowed version of maml
+        windowed_data = cumulative_data[-window:] if len(cumulative_data) > window else cumulative_data
+        windowed_adapted_params, windowed_loss, _ = online_adapt_maml(
+            model=model,
+            loss_fn=model.loss_function,
+            data_stream=windowed_data,  # last `window` observations
+            lr=lr,
+            use_full_history=True,  # we use all observations in the window
+        )
+
         # Generate a new batch of data for evaluation
         n_points = 1000
         _y0 = torch.empty(1, n_points, 2, device=device).uniform_(*dataset.y0_range)
@@ -158,14 +170,22 @@ with tqdm.trange(500) as tqdm_bar:
         # Compute node predictions with cumulative update
         cumulative_node_pred = model.forward((_y0, _dt), {'params': cumulative_adapted_params})
         cumulative_loss = model.loss_function(cumulative_node_pred, _y1)
+
+        # Compute node predictions with windowed update
+        windowed_node_pred = model.forward((_y0, _dt), {'params': windowed_adapted_params})
+        windowed_loss = model.loss_function(windowed_node_pred, _y1)
         
+        # Store the losses
         losses_node.append(loss.item())
         losses_node_cumulative.append(cumulative_loss.item())
+        losses_node_window.append(windowed_loss.item())
+
 
         tqdm_bar.set_postfix(
             {
                 "loss_node": f"{loss.item():.2e}",
                 "loss_node_cumulative": f"{cumulative_loss.item():.2e}",
+                "loss_node_window": f"{windowed_loss.item():.2e}",
             }
         )
 
@@ -193,6 +213,7 @@ ax.minorticks_on()
 ax.grid(which="both", axis="y", linestyle=":", linewidth=0.5)
 ax.plot(losses_node, label="MAML NODE Loss", color='blue')
 ax.plot(losses_node_cumulative, label="MAML (cumulative data) NODE Loss", color='orange')
+ax.plot(losses_node_window, label="MAML (windowed data) NODE Loss", color='green')
 plt.legend()
 plt.tight_layout()
 # plt.show()
@@ -204,4 +225,5 @@ losses_node_cumulative = torch.tensor(losses_node_cumulative, device=device)
 torch.save({
     "losses_node": losses_node,
     "losses_node_cumulative": losses_node_cumulative,
+    "losses_node_window": torch.tensor(losses_node_window, device=device),
 }, f"./logs/VanDerPol_{alg}/losses.pth")

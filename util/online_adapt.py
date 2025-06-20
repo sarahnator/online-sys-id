@@ -10,7 +10,7 @@ def online_adapt_maml(
     use_full_history: bool = False,
 ) -> Tuple[Dict[str,torch.Tensor], list]:
     """
-    Generic online adaptation for *any* model.forward signature.
+    Generic online adaptation for any model.forward signature.
     data_stream is an iterable of tuples, where each tuple contains:
     - inputs: a tuple of inputs to the model (e.g., (x,)),
     - targets: the target tensor (e.g., y).
