@@ -11,6 +11,61 @@ def van_der_pol(t, x, mu=1.0):
     dx2 = mu * (1 - x1 ** 2) * x2 - x1
     return torch.stack([dx1, dx2], dim=-1)
 
+def mu_linear_ramp(t, mu_0=0.0, mu_final=2.0, ramp_duration=5000, device='cpu'):
+    """
+    Linear ramp modulation of the mu parameter for the Van der Pol oscillator.
+    This function generates a time-varying mu parameter that ramps from mu_0 to mu_final over a specified duration.
+
+    Args:
+        t (torch.Tensor): Time tensor.
+        mu_0 (float): Initial value of the mu parameter.
+        mu_final (float): Final value of the mu parameter.
+        ramp_duration (int): Duration over which the ramp occurs.
+        device (str): Device to place the tensor on (e.g., 'cpu', 'cuda').
+    """
+    mu = torch.empty(1, device=device).uniform_(mu_0, mu_final)
+    ramp = torch.clamp(t / ramp_duration, 0, 1)
+    return mu * ramp
+
+def mu_sinusoidal_modulation(t, omega=0.2, A=0.1, mu_range=(-1.0, 1.0), device='cpu'):
+    """
+    Sinusoidal modulation of the mu parameter for the Van der Pol oscillator.
+    This function generates a time-varying mu parameter based on a sinusoidal function.
+
+    Args:
+        t (torch.Tensor): Time tensor.
+        omega (float): Frequency of the sinusoidal modulation.
+        A (float): Amplitude of the modulation.
+        mu_0 (float): Base value of the mu parameter.
+        device (str): Device to place the tensor on (e.g., 'cpu', 'cuda').
+    """
+    mu_0 = torch.empty(1, device=device).uniform_(*mu_range)
+    mu = mu_0 + A * torch.sin(omega * t)
+
+    return mu
+
+def mu_piecewise_constant(t, interval_length=1_000, mu_range=(-2.0, 2.0),  device='cpu'):
+    """
+    Piecewise constant modulation of the mu parameter for the Van der Pol oscillator.
+    This function generates a time-varying mu parameter based on specified change points.
+    
+    Args:
+        t (torch.Tensor): Time tensor.
+        interval_length (int): Length of each interval in the piecewise constant function.
+        device (str): Device to place the tensor on (e.g., 'cpu', '
+    Returns:
+        torch.Tensor: Time-varying mu parameter.
+    """
+    intervals = torch.arange(0, t.max(), interval_length, device=device)
+    random_mus = torch.empty(t.shape[0], device=device).uniform_(*mu_range)
+    # Assign a random mu to each interval
+    interval_indices = torch.randint(0, random_mus.shape[0], (intervals.shape[0],), device=device)
+    interval_mus = random_mus[interval_indices]
+    mu = t.clone().to(device)
+    mu = interval_mus[mu // interval_length]
+
+    return mu
+
 class VanDerPolDataset(IterableDataset):
     """
     Iterable dataset for the Van der Pol oscillator.
