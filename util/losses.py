@@ -91,3 +91,42 @@ def neural_ode_loss(
     prediction_loss = torch.nn.functional.mse_loss(prediction, y1)
     return prediction_loss
 
+def mlp_loss(model: torch.nn.Module, batch: Tuple[
+    torch.Tensor,  # y0
+    torch.Tensor,  # y1
+    torch.Tensor,  # y0_example
+    torch.Tensor,  # y1_example
+    dict,  # info
+], device: torch.device) -> torch.Tensor:
+    """Compute the MLP loss.
+
+    Args:
+        model (torch.nn.Module): Model with a residual_function
+        batch (Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]): A batch containing:
+            - y0: Initial conditions
+            - dt: Time steps
+            - y1: Target values after time step
+            - y0_example: Example initial conditions
+            - dt_example: Example time steps
+            - y1_example: Example target values after time step
+            - info: Additional information (e.g., parameters)
+    Returns:
+        torch.Tensor: Neural ODE loss
+    """
+    y0, dt, y1, y0_example, dt_example, y1_example, info = batch
+
+    # move to device
+    y0 = y0.to(device)
+    y1 = y1.to(device)
+    y0_example = y0_example.to(device)
+    y1_example = y1_example.to(device)
+
+    try:
+        coefficients, G = model.compute_coefficients(y0_example, y1_example)
+        prediction = model(y0, coefficients=coefficients)
+    except Exception as e:
+        # print(f"Error in computing coefficients: {e}")
+        prediction = model(y0)
+
+    prediction_loss = torch.nn.functional.mse_loss(prediction, y1)
+    return prediction_loss

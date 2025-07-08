@@ -1,7 +1,9 @@
 from typing import List, Callable, Union, Tuple, Mapping
 import torch
+from models.BaseModel import BaseModel
 
-class MLP(torch.nn.Module):
+# class MLP(torch.nn.Module):
+class MLP(BaseModel):
     """A simple multi-layer perceptron neural network.
 
     Args:
@@ -52,7 +54,7 @@ class MLP(torch.nn.Module):
                 # W has shape [batch_size, out_features, in_features]
                 # b has shape [batch_size, out_features]
                 # x has shape [batch_size, n_points, in_features]
-        
+              
                 x = torch.einsum("bmn,bdn->bdm", W, x) + b.unsqueeze(1) # Ax+b , the bias is broad cast among the n_points dimension
                 x = self.activation(x) # apply activation function
                 # x = torch.nn.functional.linear(x, params[i][0], params[i][1])

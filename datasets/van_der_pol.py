@@ -27,7 +27,7 @@ def mu_linear_ramp(t, mu_0=0.0, mu_final=2.0, ramp_duration=5000, device='cpu'):
     ramp = torch.clamp(t / ramp_duration, 0, 1)
     return mu * ramp
 
-def mu_sinusoidal_modulation(t, omega=0.2, A=0.1, mu_range=(-1.0, 1.0), device='cpu'):
+def mu_sinusoidal_modulation(t, A=0.1, mu_range=(-1.0, 1.0), device='cpu'):
     """
     Sinusoidal modulation of the mu parameter for the Van der Pol oscillator.
     This function generates a time-varying mu parameter based on a sinusoidal function.
@@ -40,10 +40,26 @@ def mu_sinusoidal_modulation(t, omega=0.2, A=0.1, mu_range=(-1.0, 1.0), device='
         device (str): Device to place the tensor on (e.g., 'cpu', 'cuda').
     """
     mu_0 = torch.empty(1, device=device).uniform_(*mu_range)
+    # make the wavelength of the sinusoidal modulation equal to the length of t
+    omega = (2 * torch.pi / t.max())
     mu = mu_0 + A * torch.sin(omega * t)
 
     return mu
 
+def mu_constant(t, device='cpu'):
+    """
+    Constant modulation of the mu parameter for the Van der Pol oscillator.
+    This function returns a constant mu value for all time steps.
+
+    Args:
+        t (torch.Tensor): Time tensor.
+        mu (float): Value of the mu parameter.
+        device (str): Device to place the tensor on (e.g., 'cpu', 'cuda').
+    """
+    mu = torch.empty(1, device=device).uniform_(-2.0, 2.0).item()  # Random constant mu
+    return torch.full_like(t, mu, device=device)
+
+    
 def mu_piecewise_constant(t, interval_length=1_000, mu_range=(-2.0, 2.0),  device='cpu'):
     """
     Piecewise constant modulation of the mu parameter for the Van der Pol oscillator.

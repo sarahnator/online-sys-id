@@ -1,4 +1,5 @@
 from typing import Callable, Optional, Tuple, Union
+from models.maml import copy_params
 
 import torch
 import torch.nn as nn
@@ -107,7 +108,7 @@ mu = torch.empty(1, device=device).uniform_(*dataset.mu_range) # random initial 
 plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
 losses_maml_with_meta_update = []
 losses_maml = []  # to store the losses for each step
-adapted_weights = model.copy_params(1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+adapted_weights = copy_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
 with tqdm.trange(5000) as tqdm_bar:
     for step in tqdm_bar:
 

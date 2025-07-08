@@ -1,6 +1,7 @@
 import torch
 from models.maml import copy_params
 from typing import Callable, Iterable, Tuple, Dict
+from architecture.neural_ode import NeuralODE  
 
 def online_adapt_maml(
     model: torch.nn.Module,
@@ -15,7 +16,7 @@ def online_adapt_maml(
     - inputs: a tuple of inputs to the model (e.g., (x,)),
     - targets: the target tensor (e.g., y).
     """
-    batch_size = 1  # We assume one sample per time-step
+    batch_size = 1  # We assume a batch size of 1 for online adaptation (there is one observation/task at a timestep)
 
     # 1) Extract and clone all parameters for adaptation
     params = copy_params(model, batch_size)
@@ -37,8 +38,8 @@ def online_adapt_maml(
         # inputs_seq is a tuple of input‐tensors, length = len(data)
         # targets_seq is the same for targets
 
-        # 1) stack the targets
-        targets = torch.stack(targets_seq, dim=1)
+        # # 1) stack the targets
+        # targets = torch.stack(targets_seq, dim=1)
 
         # 2) figure out how many "positional args" each inputs tuple has
         # if only one step, just grab that tuple directly
@@ -54,11 +55,14 @@ def online_adapt_maml(
             for i in range(N):
                 slot = [inp[i] for inp in inputs_seq]
                 # now slot is a list of Tensors of length >1
-                stacked_args.append(torch.cat(slot, dim=1))
+                stacked_args.append(torch.stack(slot, dim=1))
             args = tuple(stacked_args)
             targets = torch.cat(targets_seq, dim=1)
         # compute the loss and grads for the current step
-        y_pred = model.forward(args, {'params': params})
+        if type(model) is NeuralODE:
+            y_pred = model.forward(args, {'params': params})
+        else:
+            y_pred = model.forward(args[0], params)
         loss = loss_fn(y_pred, targets)
         losses.append(loss.item())
 

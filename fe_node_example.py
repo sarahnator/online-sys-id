@@ -1,8 +1,9 @@
 import torch
 import matplotlib.pyplot as plt
 import tqdm
+from typing import Callable
 from torch.utils.data import DataLoader
-from datasets.van_der_pol import VanDerPolDataset, van_der_pol, mu_piecewise_constant, mu_linear_ramp, mu_sinusoidal_modulation
+from datasets.van_der_pol import VanDerPolDataset, van_der_pol, mu_piecewise_constant, mu_constant, mu_linear_ramp, mu_sinusoidal_modulation
 from architecture.neural_ode import rk4_step
 from models.get_model import get_model
 from util.coefficients import recursive_least_squares_update
@@ -98,7 +99,7 @@ def qualitative_evaluation():
         fig.savefig(f"./logs/VanDerPol_{alg}/qualitative_example.png", bbox_inches='tight')
         plt.close(fig)
 
-def quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5000):
+def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trange: int = 5000):
     """
     This function performs a quantitative evaluation of the model by computing
     the mean squared error (MSE) between the model predictions and the ground truth.
@@ -126,7 +127,7 @@ def quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5000):
         with tqdm.trange(trange) as tqdm_bar:
             for step in tqdm_bar:
 
-                # # Update the mu parameter every 500 steps
+                # # Update the mu parameter every 1000 steps
                 # if step % 1000 == 0 and step > 0:
                 #     mu = torch.empty(1, device=device).uniform_(*dataset.mu_range)
                 #     plotting_mu.append(mu.item())
@@ -243,9 +244,10 @@ def quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5000):
         fig.savefig(f"./logs/VanDerPol_{alg}/losses_{mu_func_string}.png", bbox_inches='tight')
 
         # save the losses
-        # losses_fe_node = torch.tensor(loss_rls, device=device)
         torch.save({
-            "losses_fe_node": losses_rls,
+            "losses_fe_rls": losses_rls,
+            "losses_fe_baseline": losses_baseline,
+            "mu": mu,
         }, f"./logs/VanDerPol_{alg}/losses_{mu_func_string}.pth")
 
 if __name__ == "__main__":
@@ -253,4 +255,5 @@ if __name__ == "__main__":
     quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5000)
     quantitative_evaluation(mu_function=mu_sinusoidal_modulation, trange=5000)
     quantitative_evaluation(mu_function=mu_linear_ramp, trange=5000)
+    quantitative_evaluation(mu_function=mu_constant, trange=5000)
     print("Evaluation completed.")
