@@ -22,7 +22,7 @@ def online_adapt_maml(
     params = copy_params(model, batch_size)
 
     losses = []
-    param_updates = []
+    param_updates = [params.copy()]
 
     for t in range(len(data_stream)):
         # 2) Run your model with the current parameters
@@ -55,9 +55,9 @@ def online_adapt_maml(
             for i in range(N):
                 slot = [inp[i] for inp in inputs_seq]
                 # now slot is a list of Tensors of length >1
-                stacked_args.append(torch.stack(slot, dim=1))
-            args = tuple(stacked_args)
-            targets = torch.cat(targets_seq, dim=1)
+                stacked_args.append(torch.cat(slot, dim=1))
+            args = tuple(stacked_args) # [batch, points, in_features] = [1, N, in_features]
+            targets = torch.cat(targets_seq, dim=1) # dimensions [batch, points, out_features]
         # compute the loss and grads for the current step
         if type(model) is NeuralODE:
             y_pred = model.forward(args, {'params': params})
@@ -68,10 +68,9 @@ def online_adapt_maml(
 
         grads = torch.autograd.grad(loss, [p for tuple in params for p in tuple], retain_graph=True)
 
-        # 4) Do a step of SGD in param-space
-            
+        # 4) Do a step of SGD in param-space from the parameters of the previous step
         for i in range(len(params)):
-            W, b = params[i]
+            W, b = param_updates[-1][i]
             W_grad, b_grad = grads[2*i], grads[2*i + 1]
             if torch.isnan(W_grad).any():
                 print("NaN detected")

@@ -334,7 +334,7 @@ class MAML2(MAML):
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
         for t in range(n_points): # num updates is equal to the number of points in the time series
-            # Continually update the model using all of the data up to time t? # TODO also implement a version that only uses the last time step
+            # Update the model on the single point at time t
             predictions = self.forward(x[:, t:t+1, :], params)
             loss = self.loss_function(predictions, y[:, t:t+1, :])
             losses[t] = loss.item()
@@ -541,6 +541,49 @@ class MAML2_NODE(MAML2):
         # params = params.unsqueeze(0).expand(batch_size, -1, -1)
         params = copy_params(self.model, batch_size)  # copy the parameters for each task in the batch
         # TODO: test accuracy pre-update. Should be random accuracy.
+
+        losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
+        for t in range(n_points): # num updates is equal to the number of points in the time series
+            # Continually update the model using all of the data up to time t? # TODO also implement a version that only uses the last time step
+            predictions = self.forward((x[:, t:t+1, :], dt[:, t:t+1]), model_kwargs={'params': params})
+            loss = self.loss_function(predictions, y[:, t:t+1, :])
+            losses[t] = loss.item()
+            # print(f"Inner update {t+1}/{n_points}, loss: {loss.item():.4f}")
+
+            # back prop to compute gradients, retain graph so we can compute the gradient of the loss w.r.t. the parameters
+            # without losing the computation graph. 
+            # Essentially, this allows us to use the same forward pass results for multiple backward passes.
+            grads = torch.autograd.grad(loss, [p for tuple in params for p in tuple], retain_graph=True)
+            # update the parameters using the gradients (do stochastic gradient descent)
+            # Tyler's code: update the parameters by hand, since torch  is not meant for this.
+            for i in range(len(params)):
+                W, b = params[i]
+                W_grad, b_grad = grads[2*i], grads[2*i + 1]
+                if torch.isnan(W_grad).any():
+                    print("NaN detected")
+                if torch.isnan(b_grad).any():
+                    print("NaN detected")
+                W = W - self.internal_learning_rate * W_grad
+                b = b - self.internal_learning_rate * b_grad
+                params[i] = (W, b)
+
+        # TODO: test accuracy post-update. Should be better than pre-update.
+
+        # mean the losses over all updates
+        mean_loss = torch.mean(losses.cpu())
+        return params, mean_loss
+    
+    def inner_update_step_from_params(self, x, dt, y, params):
+        """ Note: Tyler warns this might be very slow.
+        Perform inner loop updates for the MAML model. n_points corresponds to the number of time steps in the time series and the number of inner loop updates.
+        In comparison to the above implementation of MAML, this version uses a single point for each inner update.
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, n_points, input_dim).
+            y (torch.Tensor): Target tensor of shape (batch_size, n_points, output_dim).
+        Returns:
+            torch.Tensor: Updated weights after the inner loop updates.
+        """
+        n_points = x.size(1)
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
         for t in range(n_points): # num updates is equal to the number of points in the time series

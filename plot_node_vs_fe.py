@@ -9,6 +9,7 @@ for test in tests:
     losses_fe_rls = losses_fe["losses_fe_rls"]
     losses_fe_baseline = losses_fe["losses_fe_baseline"]
     losses_maml = torch.load(f"./logs/VanDerPol_MAML2_NODE/losses_{test}.pth")["losses_maml"].cpu()
+    # losses_maml = torch.load(f"./logs/VanDerPol_NODE/losses_{test}.pth")["losses_maml"].cpu()
 
     # Plot the losses
     fig, ax = plt.subplots(1, 1, figsize=(12, 5))

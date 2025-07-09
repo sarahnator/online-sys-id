@@ -106,6 +106,8 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
     # plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
     mu = mu_function(t=torch.arange(trange, device=device), device=device) # time-varying mu parameter
     losses_maml = []  # to store the losses for each step
+    adapted_weights = copy_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+
     with tqdm.trange(trange) as tqdm_bar:
         for step in tqdm_bar:
 
@@ -119,8 +121,8 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
             y0 = torch.empty(1, 1, 2, device=device).uniform_(*dataset.y0_range)
             dt = torch.empty(1, 1, device=device).uniform_(*dataset.dt_range)
             y1 = rk4_step(van_der_pol, y0, dt, mu=mu_t)
-            
-            adapted_weights, _ = model.inner_update_step(x=y0, dt=dt, y=y1)
+
+            adapted_weights, _ = model.inner_update_step_from_params(x=y0, dt=dt, y=y1, params=adapted_weights)
 
             # Generate a new batch of data for evaluation
             n_points = 1000

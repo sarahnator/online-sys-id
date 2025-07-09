@@ -13,7 +13,7 @@ def get_loss_function(algorithm: str):
     Returns:
         Callable: The loss function to be used.
     """
-    if algorithm == 'FE_NODE' or algorithm == 'MAML2_NODE' or algorithm == "NODE":
+    if algorithm == 'FE_NODE' or algorithm == 'MAML2_NODE' or algorithm == 'MAML_NODE' or algorithm == "NODE":
         return neural_ode_loss
     elif algorithm == 'MAML_MLP' or algorithm == 'MAML2_MLP':
         return torch.nn.MSELoss()
@@ -82,7 +82,7 @@ def get_model(algorithm: str, n_layers:int=0, n_params: int=0, n_basis: int=0, d
             meta_learning_rate=1e-3,
             internal_learning_rate=1e-3,
         ).to(device)
-    elif algorithm == 'MAML2_NODE':
+    elif algorithm == 'MAML2_NODE' or algorithm == 'MAML_NODE':
         layer_sizes = [3, 64, 64, 2]  # Example layer sizes for MLP and NODE, adjust this later based on n_params
         activation = torch.nn.ReLU()
         bias = True
