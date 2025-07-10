@@ -1,5 +1,5 @@
 from typing import Callable, Optional, Tuple, Union
-from models.maml import copy_params
+from models.maml import copy_model_params
 from util.online_adapt import online_adapt_maml
 
 import torch
@@ -24,6 +24,7 @@ else:
 torch.manual_seed(42)
 
 # Load dataset
+# as you increase n_example_points, the model improves its predictions (see how the qualitative evaluation figure changes for the first mu!)
 dataset = VanDerPolDataset(n_points=100, n_example_points=10_000, dt_range=(0.1, 0.1))
 dataloader = DataLoader(dataset, batch_size=50)
 dataloader_iter = iter(dataloader)
@@ -49,11 +50,10 @@ y1=y1.to(device)
 dt=dt.to(device)
 y0_example = y0_example.to(device)
 y1_example = y1_example.to(device)
-params = copy_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+params = copy_model_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
 adapted_weights, _ = model.inner_update_step(x=y0_example[0,...].unsqueeze(0), y=y1_example[0,...].unsqueeze(0)) # note here we use the last parameter estimate generated from a growing dataset
 # adapted_weights, _ = model.inner_update_step_from_params(x=y0_example[0,...].unsqueeze(0), y=y1_example[0,...].unsqueeze(0), params=params) # note here we use the last parameter estimate generated from a growing dataset
-# do the same with the online_adapt_maml call.
-
+# do the same with the online_adapt_maml call to make sure it works
 data_stream = [(x.unsqueeze(0).unsqueeze(0),y.unsqueeze(0).unsqueeze(0)) for x, y in zip(y0_example[0,...], y1_example[0,...])]  # create a data stream from the example
 adapted_weights2, _,_ = online_adapt_maml(model=model.model, loss_fn=model.loss_function, data_stream=data_stream, lr=model.internal_learning_rate, use_full_history=False)
 
@@ -88,7 +88,7 @@ ground_truth_traj = torch.stack(ground_truth_traj, dim=0).detach().cpu().numpy()
 maml_traj = torch.stack(maml_traj, dim=0).detach().cpu().numpy()
 maml_traj2 = torch.stack(maml_traj2, dim=0).detach().cpu().numpy()
 
-# Plot first 9 trajectories from the dataset
+# Plot first 9 trajectories from the dataset, but pay attention to the first mu, since we fine-tuned on that
 fig, ax = plt.subplots(3, 3, figsize=(10, 10))
 mus = info['mu'].detach().cpu().numpy()
 for i in range(3):
@@ -120,7 +120,7 @@ Quantitative evaluation of the MAML model.
 mu = torch.empty(1, device=device).uniform_(*dataset.mu_range) # random initial mu parameter
 plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
 losses_maml = []  # to store the losses for each step
-adapted_weights = copy_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+adapted_weights = copy_model_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
 with tqdm.trange(5000) as tqdm_bar:
     for step in tqdm_bar:
 

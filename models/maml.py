@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union, List
 import torch
 from models.BaseModel import BaseModel
 from torch.utils.data import IterableDataset, DataLoader
@@ -6,7 +6,7 @@ from itertools import islice
 from torch.optim import Optimizer
 import tqdm
 
-def copy_params(model: torch.nn.Module, num_copies: int) -> list:
+def copy_model_params(model: torch.nn.Module, num_copies: int) -> list:
         # copy-paste of Tyler's code
         # first generate models based on the current parameters
         # this generates a new model for each example
@@ -26,6 +26,22 @@ def copy_params(model: torch.nn.Module, num_copies: int) -> list:
                 raise NotImplementedError("Layer type not supported in copy_params")
 
         return params
+
+def copy_params(params: List[Tuple[torch.tensor, torch.tensor]], num_copies: int) -> List[Tuple[torch.tensor, torch.tensor]]:
+    """
+    Copy the parameters of a model for each task in the batch.
+    Args:
+        params (List[Tuple[torch.tensor, torch.tensor]]): List of tuples containing (weight, bias) for each layer.
+        num_copies (int): Number of copies to create for each parameter.
+    Returns:
+        List[Tuple[torch.tensor, torch.tensor]]: List of tuples containing the copied parameters.
+    """
+    copied_params = []
+    for W, b in params:
+        W_copy = W.unsqueeze(0).expand(num_copies, -1, -1).clone()
+        b_copy = b.unsqueeze(0).expand(num_copies, -1).clone()
+        copied_params.append((W_copy, b_copy))
+    return copied_params
 
 class MAML(BaseModel):
     def __init__(self, model, meta_learning_rate: float = 1e-3, internal_learning_rate: float = 1e-3):
@@ -108,7 +124,7 @@ class MAML(BaseModel):
         n_points = x.size(1)
         batch_size = x.size(0)
 
-        params = copy_params(self.model, batch_size)  # copy the parameters for each task in the batch
+        params = copy_model_params(self.model, batch_size)  # copy the parameters for each task in the batch
         # TODO: test accuracy pre-update. Should be random accuracy.
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
@@ -329,7 +345,7 @@ class MAML2(MAML):
 
         # extend params to (batch_size, parameter_size) so that we have a parameter update for each task (batch)
         # params = params.unsqueeze(0).expand(batch_size, -1, -1)
-        params = copy_params(self.model, batch_size)  # copy the parameters for each task in the batch
+        params = copy_model_params(self.model, batch_size)  # copy the parameters for each task in the batch
         # TODO: test accuracy pre-update. Should be random accuracy.
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
@@ -539,7 +555,7 @@ class MAML2_NODE(MAML2):
 
         # extend params to (batch_size, parameter_size) so that we have a parameter update for each task (batch)
         # params = params.unsqueeze(0).expand(batch_size, -1, -1)
-        params = copy_params(self.model, batch_size)  # copy the parameters for each task in the batch
+        params = copy_model_params(self.model, batch_size)  # copy the parameters for each task in the batch
         # TODO: test accuracy pre-update. Should be random accuracy.
 
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update

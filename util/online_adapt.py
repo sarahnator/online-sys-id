@@ -1,6 +1,6 @@
 import torch
-from models.maml import copy_params
-from typing import Callable, Iterable, Tuple, Dict
+from models.maml import copy_params, copy_model_params
+from typing import Callable, Iterable, List, Optional, Tuple, Dict
 from architecture.neural_ode import NeuralODE  
 
 def online_adapt_maml(
@@ -9,17 +9,26 @@ def online_adapt_maml(
     data_stream: Iterable[Tuple[Tuple, torch.Tensor]],
     lr: float,
     use_full_history: bool = False,
+    _params: Optional[List[Tuple[torch.tensor, torch.tensor]]] = None
 ) -> Tuple[Dict[str,torch.Tensor], list]:
     """
     Generic online adaptation for any model.forward signature.
     data_stream is an iterable of tuples, where each tuple contains:
     - inputs: a tuple of inputs to the model (e.g., (x,)),
     - targets: the target tensor (e.g., y).
+    The data_stream is the data used for online adaptation at a single timestep, which can be a single observation or a window of observations.
+    
+    To continuously adapt the model, you can call this function in a loop, feeding it new data at each step and updating the model parameters.
     """
     batch_size = 1  # We assume a batch size of 1 for online adaptation (there is one observation/task at a timestep)
 
     # 1) Extract and clone all parameters for adaptation
-    params = copy_params(model, batch_size)
+    if _params is None:
+        # if no params are provided, we copy the model parameters
+        params = copy_model_params(model, batch_size)
+    else:
+        # params = copy_params(_params, batch_size)
+        params = _params # use the provided parameters for adaptation
 
     losses = []
     param_updates = [params.copy()]

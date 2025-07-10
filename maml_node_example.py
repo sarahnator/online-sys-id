@@ -106,7 +106,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
     # plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
     mu = mu_function(t=torch.arange(trange, device=device), device=device) # time-varying mu parameter
     losses_maml = []  # to store the losses for each step
-    adapted_weights = copy_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+    adapted_weights = copy_model_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
 
     with tqdm.trange(trange) as tqdm_bar:
         for step in tqdm_bar:

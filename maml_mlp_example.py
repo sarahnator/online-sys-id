@@ -1,5 +1,5 @@
 from typing import Callable, Optional, Tuple, Union
-from models.maml import copy_params
+from models.maml import copy_model_params
 
 import torch
 import torch.nn as nn
@@ -23,13 +23,13 @@ else:
 torch.manual_seed(42)
 
 # Load dataset
-dataset = VanDerPolDataset(n_points=100, n_example_points=100, dt_range=(0.1, 0.1))
+dataset = VanDerPolDataset(n_points=100, n_example_points=1_000, dt_range=(0.1, 0.1))
 dataloader = DataLoader(dataset, batch_size=50)
 dataloader_iter = iter(dataloader)
 
 # Create model
-# alg = 'MAML2_MLP'
-alg = 'MAML_MLP'
+alg = 'MAML2_MLP'
+# alg = 'MAML_MLP'
 model = get_model(algorithm=alg, device=device)
 model.load_state_dict(torch.load(f"./logs/VanDerPol_{alg}/model.pth", map_location=device))
 model.loss_function = torch.nn.MSELoss()
@@ -108,7 +108,7 @@ mu = torch.empty(1, device=device).uniform_(*dataset.mu_range) # random initial 
 plotting_mu = [mu.item()]  # for plotting purposes, we will keep track of the mu parameter
 losses_maml_with_meta_update = []
 losses_maml = []  # to store the losses for each step
-adapted_weights = copy_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+adapted_weights = copy_model_params(model.model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
 with tqdm.trange(5000) as tqdm_bar:
     for step in tqdm_bar:
 

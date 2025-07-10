@@ -143,7 +143,7 @@ losses = []
 # make a prediction with the base model parameters
 y0 = trajectories[:, 0, :]  # initial condition for the trials
 y1_true = trajectories[:, 1, :]  # ground truth next state
-init_params = copy_params(model.model, n_trials)  # initial parameters for the model
+init_params = copy_model_params(model.model, n_trials)  # initial parameters for the model
 pred = y0 + model.forward((y0, dt), {"params": init_params})  # make a prediction with the base model parameters
 losses.append(model.loss_function(pred, y1_true).item())
 one_step_predicted_states = [y0.detach().cpu() + pred.detach().cpu()]
