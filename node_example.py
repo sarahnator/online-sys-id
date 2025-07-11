@@ -119,9 +119,10 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
     cumulative_data = []
     # set the update MAML parameters
     lr = 1e-3
-    window = 100  # use a window of 50 steps for the windowed version of maml
+    window = 100  # use a window of 100 steps for the windowed version of maml
 
-    adapted_params = copy_model_params(model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+    _adapted_params = copy_model_params(model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+    _adapted_windowed_params = _adapted_params.copy()  # copy the parameters for the windowed version of maml
     with tqdm.trange(trange) as tqdm_bar:
         for step in tqdm_bar:
 
@@ -145,7 +146,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
                 data_stream=[((y0, dt), y1)],  # single observation
                 lr=lr,
                 use_full_history=False,  # we only use the single observation
-                _params=adapted_params,  # use the current adapted parameters
+                _params=_adapted_params,  # use the current adapted parameters
             )
 
             # # Cumulative version of maml
@@ -155,7 +156,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
             #     data_stream=cumulative_data,  # all observations so far
             #     lr=lr,
             #     use_full_history=True,  # we use all observations
-            #     _params=adapted_params,  # use the current adapted parameters
+            #     _params=_adapted_params,  # use the current adapted parameters
             # )
 
             # Windowed version of maml
@@ -166,7 +167,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
                 data_stream=windowed_data,  # last `window` observations
                 lr=lr,
                 use_full_history=True,  # we use all observations in the window
-                _params=adapted_params,  # use the current adapted parameters
+                _params=_adapted_windowed_params,  # use the current adapted windowed parameters
             )
 
             # Generate a new batch of data for evaluation
@@ -201,6 +202,10 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
                 }
             )
 
+            # set the adapted parameters for the next step
+            _adapted_params = adapted_params.copy()
+            _adapted_windowed_params = windowed_adapted_params.copy()
+
     mu_func_string = mu_function.__name__
 
     # Plot the stand alone loss
@@ -214,7 +219,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
         ax.text(
             x,               # data x
             0.1,               # axis-fraction y = 0 (bottom of the plotting area)
-            f"$\\mu$={m:.1f}",
+            f"$\\mu$={m:.2f}",
             transform=ax.get_xaxis_transform(),  # <-- key!
             rotation=90,
             va='bottom',     # push the text upward from the axis spine
@@ -232,16 +237,17 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
     plt.legend()
     plt.tight_layout()
     # plt.show()
-    fig.savefig(f"./logs/VanDerPol_{alg}/losses_{mu_func_string}.png", bbox_inches='tight')
+    fig.savefig(f"./logs/VanDerPol_{alg}/losses_{mu_func_string}_{window}.png", bbox_inches='tight')
 
     # save the losses
     losses_node = torch.tensor(losses_node, device=device)
     losses_node_cumulative = torch.tensor(losses_node_cumulative, device=device)
     torch.save({
+        "mu": mu,
         "losses_node": losses_node,
         # "losses_node_cumulative": losses_node_cumulative,
         "losses_node_window": torch.tensor(losses_node_window, device=device),
-    }, f"./logs/VanDerPol_{alg}/losses_{mu_func_string}.pth")
+    }, f"./logs/VanDerPol_{alg}/losses_{mu_func_string}_{window}.pth")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ def online_adapt_maml(
     
     To continuously adapt the model, you can call this function in a loop, feeding it new data at each step and updating the model parameters.
     """
-    batch_size = 1  # We assume a batch size of 1 for online adaptation (there is one observation/task at a timestep)
+    batch_size = 1  # We assume a batch size of 1 for online adaptation (there is one observation/task at a timestep, this can be either a single datapoint or a window of datapoints).
 
     # 1) Extract and clone all parameters for adaptation
     if _params is None:
@@ -42,36 +42,32 @@ def online_adapt_maml(
             # just the single step at t
             data = data_stream[t:t+1]
 
-        # now unzip the list of tuples into two lists
+        # unzip the list of tuples into two lists
         inputs_seq, targets_seq = zip(*data)
         # inputs_seq is a tuple of input‐tensors, length = len(data)
         # targets_seq is the same for targets
 
-        # # 1) stack the targets
-        # targets = torch.stack(targets_seq, dim=1)
-
-        # 2) figure out how many "positional args" each inputs tuple has
-        # if only one step, just grab that tuple directly
-        if len(inputs_seq) == 1:
-            # inputs_seq[0] is either a Tensor or a tuple of Tensors
-            args = (inputs_seq[0],) if isinstance(inputs_seq[0], torch.Tensor) \
-                else inputs_seq[0]
-            targets = targets_seq[0]
+        # stack along the time dimension for each of the inputs and targets
+        if type(inputs_seq[0]) is not tuple:
+            args = torch.cat([inp for inp in inputs_seq], dim=1)
+            # args is now a Tensor of shape [batch, points, in_features]
         else:
-            # full‐history case: do your normal stack-along-time
-            N = len(inputs_seq[0])
+            # in the neural_ode case, each entry of inputs_seq is a tuple of Tensors, with shape ([batch, points, in_features], [1,1])
+            # we need to stack the inputs along the time dimension
             stacked_args = []
-            for i in range(N):
+            for i in range(len(inputs_seq[0])):
                 slot = [inp[i] for inp in inputs_seq]
                 # now slot is a list of Tensors of length >1
                 stacked_args.append(torch.cat(slot, dim=1))
             args = tuple(stacked_args) # [batch, points, in_features] = [1, N, in_features]
-            targets = torch.cat(targets_seq, dim=1) # dimensions [batch, points, out_features]
+        targets = torch.cat([target for target in targets_seq], dim=1)
+        # targets is now a Tensor of shape [batch, points, out_features]
+
         # compute the loss and grads for the current step
         if type(model) is NeuralODE:
             y_pred = model.forward(args, {'params': params})
         else:
-            y_pred = model.forward(args[0], params)
+            y_pred = model.forward(args, params)
         loss = loss_fn(y_pred, targets)
         losses.append(loss.item())
 
