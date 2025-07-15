@@ -9,7 +9,7 @@ for test in tests:
     losses_fe_rls = losses_fe["losses_fe_rls"]
     losses_fe_baseline = losses_fe["losses_fe_baseline"]
     mu = losses_fe["mu"]
-    # losses_maml = torch.load(f"./logs/VanDerPol_MAML2_NODE/losses_{test}.pth")["losses_maml"].cpu()
+    losses_meta_trained_maml_one_shot = torch.load(f"./logs/VanDerPol_MAML2_NODE/losses_{test}.pth")["losses_maml"].cpu()
     losses_maml_50_shot = torch.load(f"./logs/VanDerPol_NODE/losses_{test}_50.pth")["losses_node_window"].cpu()
     losses_maml_100_shot = torch.load(f"./logs/VanDerPol_NODE/losses_{test}_100.pth")["losses_node_window"].cpu()
     losses_maml_one_shot = torch.load(f"./logs/VanDerPol_NODE/losses_{test}_50.pth")["losses_node"].cpu()
@@ -34,6 +34,7 @@ for test in tests:
         )
 
     # Plot the losses - maml first
+    ax.plot(losses_meta_trained_maml_one_shot, label="Meta-trained NODE + MAML (1-shot)", color='C5')
     ax.plot(losses_maml_one_shot, label="NODE + MAML (1-shot)", color='C4')
     ax.plot(losses_maml_50_shot, label="NODE + MAML (50-shot)", color='C2')
     ax.plot(losses_maml_100_shot, label="NODE + MAML (100-shot)", color='C3')

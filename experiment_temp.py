@@ -1,4 +1,5 @@
 from typing import Callable, Optional, Tuple, Union
+import argparse
 from util.losses import neural_ode_loss
 import torch
 import torch.nn as nn
@@ -13,31 +14,9 @@ import time
 
 import tqdm
 
-if torch.cuda.is_available():
-    device = "cuda"
-elif torch.backends.mps.is_available():
-    device = "mps"
-else:
-    device = "cpu"
-
-torch.manual_seed(42)
-
-# Load dataset
-dataset = VanDerPolDataset(n_points=100, n_example_points=100, dt_range=(0.1, 0.1))
-dataloader = DataLoader(dataset, batch_size=50)
-dataloader_iter = iter(dataloader)
-
-# Create model
-# alg = 'MAML_NODE'
-alg = 'MAML2_NODE'
-model = get_model(algorithm=alg, device=device)
-model.load_state_dict(torch.load(f"./logs/VanDerPol_{alg}/model.pth", map_location=device))
-model.loss_function = torch.nn.MSELoss()
-model.optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
 
 """
-Qualitative evaluation of the MAML model.
+Qualitative evaluation of the model.
 """
 def qualitative_evaluation():
     # make predictions with the model
@@ -100,7 +79,7 @@ def qualitative_evaluation():
 
     # plt.show()
     # save the figure
-    fig.savefig(f"./logs/VanDerPol_{alg}/qualitative_example.png", bbox_inches='tight')
+    fig.savefig(f"{logdir}/qualitative_example.png", bbox_inches='tight')
     plt.close(fig)
 
 def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trange: int = 5000, n_trials: int = 1):
@@ -202,7 +181,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
     plt.legend()
     plt.tight_layout()
     # plt.show()
-    fig.savefig(f"./logs/VanDerPol_{alg}/losses_{mu_func_string}.png", bbox_inches='tight')
+    fig.savefig(f"{logdir}/losses_{mu_func_string}.png", bbox_inches='tight')
 
     # save the losses
     losses_maml = torch.tensor(losses_maml, device=device)
@@ -210,11 +189,35 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
         "losses_maml": losses_maml,
         "compute_time": compute_time,
         "mu": mu,
-    }, f"./logs/VanDerPol_{alg}/losses_{mu_func_string}.pth")
+    }, f"{logdir}/losses_{mu_func_string}.pth")
+
+def setup():
+    parser = argparse.ArgumentParser()
+    # algs: ["MAML_NODE", "MAML2_NODE", "MAML2_MLP", "MLP", "NODE", "FE_NODE"]
+    parser.add_argument("--algorithm", type=str, default="MAML_NODE")
+    args = parser.parse_args()
+    
+    # create the model globally
+    global alg, device, model, logdir
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    alg = args.algorithm
+    model = get_model(algorithm=alg, device=device)
+    logdir = f"./logs/VanDerPol_{alg}"
+    model.load_state_dict(torch.load(f"{logdir}/model.pth", map_location=device))
+    model.loss_function = torch.nn.MSELoss()
+    model.optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    # create dataset and dataloader globally
+    global dataset, dataloader, dataloader_iter
+    torch.manual_seed(42)
+    dataset = VanDerPolDataset(n_points=100, n_example_points=100, dt_range=(0.1, 0.1))
+    dataloader = DataLoader(dataset, batch_size=50)
+    dataloader_iter = iter(dataloader)
 
 
 if __name__ == "__main__":
-    # qualitative_evaluation()
+    setup()
+    qualitative_evaluation()
     quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5000, n_trials=1)
     quantitative_evaluation(mu_function=mu_sinusoidal_modulation, trange=5000)
     quantitative_evaluation(mu_function=mu_linear_ramp, trange=5000)
