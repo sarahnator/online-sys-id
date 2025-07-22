@@ -175,7 +175,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
     
     # Plot the loss
     mu_func_string = mu_function.__name__
-    fig, ax = plt.subplots(1, 1, figsize=(10,10))
+    fig, ax = plt.subplots(1, 1, figsize=(4*10,10))
 
     # plot mu as vertical lines for every 1000 steps
     plotting_mu = mu[torch.arange(trange * n_trials) % 1000 == 0].detach().cpu().numpy().tolist()
@@ -215,8 +215,8 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
 
 if __name__ == "__main__":
     # qualitative_evaluation()
-    quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5000, n_trials=1)
-    quantitative_evaluation(mu_function=mu_sinusoidal_modulation, trange=5000)
-    quantitative_evaluation(mu_function=mu_linear_ramp, trange=5000)
-    quantitative_evaluation(mu_function=mu_constant, trange=5000)
+    quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5000, n_trials=20)
+    # quantitative_evaluation(mu_function=mu_sinusoidal_modulation, trange=5000)
+    # quantitative_evaluation(mu_function=mu_linear_ramp, trange=5000)
+    # quantitative_evaluation(mu_function=mu_constant, trange=5000)
     print("Evaluation completed.")
