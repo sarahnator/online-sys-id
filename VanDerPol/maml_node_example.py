@@ -28,8 +28,8 @@ dataloader = DataLoader(dataset, batch_size=50)
 dataloader_iter = iter(dataloader)
 
 # Create model
-# alg = 'MAML_NODE'
-alg = 'MAML2_NODE'
+alg = 'MAML_NODE'
+# alg = 'MAML2_NODE'
 model = get_model(algorithm=alg, device=device)
 model.load_state_dict(torch.load(f"./logs/VanDerPol_{alg}/model.pth", map_location=device))
 model.loss_function = torch.nn.MSELoss()

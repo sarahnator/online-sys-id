@@ -1,3 +1,4 @@
+import time
 import torch
 import matplotlib.pyplot as plt
 import tqdm
@@ -124,6 +125,8 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
         coefficient_baseline_norms = []
         coefficient_rls_norms = []
 
+        compute_time = []  # to store the time it takes to adapt the model and make predictions
+
         with tqdm.trange(trange) as tqdm_bar:
             for step in tqdm_bar:
 
@@ -138,6 +141,9 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
                 dt = torch.empty(1, 1, device=device).uniform_(*dataset.dt_range)
                 y1 = rk4_step(van_der_pol, y0, dt, mu=mu_t)
 
+                # track the time it takes to adapt the model and make predictions
+                t0 = time.perf_counter()
+
                 # Compute the basis functions
                 g = model.basis_functions((y0, dt))
 
@@ -151,7 +157,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
                     forgetting_factor=0.95,
                 )
 
-                # Generate a new batch of data for evaluation
+               # Generate a new batch of data for evaluation
                 n_points = 1000
                 _y0 = torch.empty(1, n_points, 2, device=device).uniform_(*dataset.y0_range)
                 _dt = torch.empty(1, n_points, device=device).uniform_(*dataset.dt_range)
@@ -165,16 +171,19 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
                 dt = _dt[:, n_example_points:]
                 y1 = _y1[:, n_example_points:, :]
 
+                # Compute the recursive least squares prediction error
+                pred = model((y0, dt), coefficients=coefficients)
+                loss_rls = torch.nn.functional.mse_loss(pred, y1)
+
+                t1 = time.perf_counter()
+                compute_time.append(t1 - t0)
+
                 # Compute the baseline error
                 coefficients_baseline, _ = model.compute_coefficients(
                     (y0_example, dt_example), y1_example
                 )
                 pred_baseline = model((y0, dt), coefficients=coefficients_baseline)
                 loss_baseline = torch.nn.functional.mse_loss(pred_baseline, y1)
-
-                # Compute the recursive least squares prediction error
-                pred = model((y0, dt), coefficients=coefficients)
-                loss_rls = torch.nn.functional.mse_loss(pred, y1)
 
                 losses_baseline.append(loss_baseline.item())
                 losses_rls.append(loss_rls.item())
@@ -247,6 +256,7 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
         torch.save({
             "losses_fe_rls": losses_rls,
             "losses_fe_baseline": losses_baseline,
+            "compute_time": compute_time,
             "mu": mu,
         }, f"./logs/VanDerPol_{alg}/losses_{mu_func_string}.pth")
 

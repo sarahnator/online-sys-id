@@ -20,7 +20,7 @@ elif torch.backends.mps.is_available():
 else:
     device = "cpu"
 
-
+# device = "cpu"  # for testing purposes, we use CPU
 torch.manual_seed(0)
 
 from models.get_model import *
@@ -31,9 +31,8 @@ def load_model(model_type, device, n_basis=8, path=None):
             model = NeuralODE(
             ode_func=ODEFunc(model=MLP(layer_sizes=[9, 128, 128, 6], activation=torch.nn.ReLU(), bias=True)),
             integrator=rk4_step,
-        ).to(device)
-            model.loss_fn = neural_ode_loss
-            loss_fn = neural_ode_loss
+        ).to(device)   
+            model.loss_fn = torch.nn.MSELoss()
             model.load_state_dict(torch.load(path, map_location=device))
         case "function_encoder":
             model = FunctionEncoder(basis_functions=BasisFunctions(
@@ -45,12 +44,30 @@ def load_model(model_type, device, n_basis=8, path=None):
                     for _ in range(n_basis)
                 ]
             )).to(device)
-            model.loss_fn = neural_ode_loss
-            loss_fn = neural_ode_loss
+            model.loss_fn = torch.nn.MSELoss()
+            model.load_state_dict(torch.load(path, map_location=device))
+        case "maml2_node":
+            model = MAML2_NODE(
+                NeuralODE(ode_func=ODEFunc(model=MLP(layer_sizes=[9, 128, 128, 6], activation=torch.nn.ReLU(), bias=True)),
+                integrator=rk4_step),
+                meta_learning_rate=1e-3,    
+                internal_learning_rate=1e-3
+            ).to(device)
+            model.loss_function = torch.nn.MSELoss()
+            model.load_state_dict(torch.load(path, map_location=device))
+        case "maml_node":
+            model = MAML_NODE(
+                NeuralODE(ode_func=ODEFunc(model=MLP(layer_sizes=[9, 128, 128, 6], activation=torch.nn.ReLU(), bias=True)),
+                integrator=rk4_step),
+                meta_learning_rate=1e-3,
+                internal_learning_rate=1e-3,
+                window_size=100,  
+            ).to(device)
+            model.loss_function = torch.nn.MSELoss()
             model.load_state_dict(torch.load(path, map_location=device))
         case _:
             raise ValueError(f"Unknown model type: {model_type}")
-    return model, loss_fn
+    return model
 
 class kStepTestDataset(IterableDataset):
     def __init__(
@@ -66,13 +83,16 @@ class kStepTestDataset(IterableDataset):
     def __iter__(self):
         while True:
             # Traj length
-            traj_length = 200
+            traj_length = 300
 
             # Sample random points from the data without replacement
             indices = torch.randperm(self.inputs[0].shape[0])
             example_indices = indices[: self.n_example_points]
 
-            init_pt = torch.randint(self.inputs[0].shape[0]-250, (1,)).item() 
+            # Choose a random starting point for the trajectory
+            # ensure that the trajectory length does not exceed the data length
+            buffer = 50
+            init_pt = torch.randint(self.inputs[0].shape[0] - (traj_length + buffer), (1,)).item()
 
             _xs = self.inputs[0][:, 1:]
             _dt = self.targets[0][:, 0] - self.inputs[0][:, 0]
@@ -85,10 +105,8 @@ class kStepTestDataset(IterableDataset):
             dt = _dt[init_pt:init_pt+traj_length]
             u = self.inputs[0][init_pt:init_pt+traj_length, 7:9]
             y = self.targets[0][init_pt:init_pt+traj_length, 1:] - x
-            info = {}
 
-            yield x, dt, u, y, example_xs, example_dt, example_ys, info
-
+            yield x, dt, u, y, example_xs, example_dt, example_ys
 
 
 
@@ -107,7 +125,7 @@ for idx in all_scenes:
     scene_inputs[idx], scene_targets[idx] = scene_data[key]
 
 # Choose the evaluation scene
-scene = 7 # Only one scene for now
+scene = 3 # Only one scene for now
 
 # Create a dataset for testing prediction errors. 
 batch_size = 200
@@ -120,153 +138,201 @@ dataloader_iter = iter(dataloader)
 n_basis = 8 
 seed = 42
 model_path = f"logs/Phoenix_function_encoder/seed={seed}/function_encoder_model.pth"
-model, loss_fn = load_model("function_encoder", device, n_basis, model_path)
+model = load_model("function_encoder", device, n_basis, model_path)
 node_model_path = f"logs/Phoenix_neural_ode/seed={seed}/neural_ode_model.pth"
-node_model, node_loss_fn = load_model("neural_ode", device, n_basis, node_model_path)
+node_model = load_model("neural_ode", device, n_basis, node_model_path)
+maml_k1_model_path = f"logs/Phoenix_maml2_node/seed={seed}/maml2_node_model.pth"
+maml_k1_model = load_model("maml2_node", device, n_basis, maml_k1_model_path)
+maml_k100_model_path = f"logs/Phoenix_maml_node/seed={seed}/maml_node_model.pth"
+maml_k100_model = load_model("maml_node", device, n_basis, maml_k100_model_path)
 
 
-# Evaluate model
-
+# Evaluate models
 node_model.eval()
 model.eval()
-with torch.no_grad():
+# with torch.no_grad():
 
-    # Initialize the coefficients, matching an assumed batch size of 1
-    coefficients = torch.zeros(batch_size, n_basis, device=device)
-    P = torch.eye(n_basis, device=device).repeat(batch_size,1,1)#.unsqueeze(0)
+# Initialize the coefficients, matching an assumed batch size of 1
+coefficients = torch.zeros(batch_size, n_basis, device=device)
+P = torch.eye(n_basis, device=device).repeat(batch_size,1,1)#.unsqueeze(0)
 
-    # set the SGD parameters
-    cumulative_data = []
-    # set the update MAML parameters
-    lr = 1e-3
-    window = 100  # use a window of 100 steps for the windowed version of maml
-    _adapted_params = copy_model_params(model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
-    _adapted_windowed_params = _adapted_params.copy() 
+baseline_err_med = []
+baseline_err_10th = []
+baseline_err_90th = []
 
-    baseline_err_med = []
-    baseline_err_10th = []
-    baseline_err_90th = []
+rls_err_med = []
+rls_err_10th = []
+rls_err_90th = []
 
-    rls_err_med = []
-    rls_err_10th = []
-    rls_err_90th = []
+node_err_med = []
+node_err_10th = []
+node_err_90th = []
 
-    node_err_med = []
-    node_err_10th = []
-    node_err_90th = []
+node_sgd_err_med = []
+node_sgd_err_10th = []
+node_sgd_err_90th = []
 
-    node_sgd_err_med = []
-    node_sgd_err_10th = []
-    node_sgd_err_90th = []
+node_sg_windowed_err_med = []
+node_sg_windowed_err_10th = []
+node_sg_windowed_err_90th = []
 
-    node_sg_windowed_err_med = []
-    node_sg_windowed_err_10th = []
-    node_sg_windowed_err_90th = []
+maml_k1_err_med = []
+maml_k1_err_10th = []
+maml_k1_err_90th = []
 
-    parameter_estimate_norms = []
-    parameter_estimate_stds = []
+maml_k100_err_med = []
+maml_k100_err_10th = []
+maml_k100_err_90th = []
 
-    # Fetch new observation
-    batch = next(dataloader_iter)
-    x, dt, u, y, _, _, _ = batch
-    x = x.to(device)
-    dt = dt.to(device)
-    u = u.to(device)
-    y = y.to(device)
+parameter_estimate_norms = []
+parameter_estimate_stds = []
 
-    # Compute baseline coefficients
-    coefficients_baseline, _ = model.compute_coefficients((torch.cat((x, u), dim=-1), dt), y)
+# Fetch new observation
+batch = next(dataloader_iter)
+x, dt, u, y, _, _, _ = batch
+x = x.to(device)
+dt = dt.to(device)
+u = u.to(device)
+y = y.to(device)
 
-    with tqdm.trange(dt.shape[1]) as tqdm_bar:
-        for step in tqdm_bar:
-            # slice relevant quantities at the current step
-            dt_step = dt[:, step].unsqueeze(1)#.unsqueeze(0)
-            y_step = y[:, step].unsqueeze(1)
-            x_step = x[:, step].unsqueeze(1)  # x is constant for the trajectory
-            u_step = u[:, step].unsqueeze(1)  # u is constant for the trajectory
+# Compute baseline coefficients
+coefficients_baseline, _ = model.compute_coefficients((torch.cat((x, u), dim=-1), dt), y)
 
-            # Append the observation to the cumulative data
-            cumulative_data.append(((torch.cat((x_step,u_step), dim=-1), dt_step), y_step))
+# set the SGD parameters
+cumulative_data = []
+# set the update MAML parameters
+lr = 1e-3
+window = 100  # use a window of 100 steps for the windowed version of maml
 
-            adapted_params, loss, _ = online_adapt_maml(
-                model=model,
-                loss_fn=model.loss_function,
-                data_stream=[((torch.cat((x_step,u_step), dim=-1), dt_step), y_step)],  # single observation
-                lr=lr,
-                use_full_history=False,  # we only use the single observation
-                _params=_adapted_params,  # use the current adapted parameters
-            )
+_adapted_params = copy_model_params(node_model, batch_size)  # copy the parameters for each task in the batch
+_adapted_windowed_params = _adapted_params.copy()
+_adapted_params_maml_k1 = copy_model_params(maml_k1_model.model, batch_size)
+_adapted_params_maml_k100 = copy_model_params(maml_k100_model.model, batch_size)
 
-           # Windowed version of maml
-            windowed_data = cumulative_data[-window:] if len(cumulative_data) > window else cumulative_data
-            windowed_adapted_params, windowed_loss, _ = online_adapt_maml(
-                model=model,
-                loss_fn=model.loss_function,
-                data_stream=windowed_data,  # last `window` observations
-                lr=lr,
-                use_full_history=True,  # we use all observations in the window
-                _params=_adapted_windowed_params,  # use the current adapted windowed parameters
-            )
+with tqdm.trange(dt.shape[1]) as tqdm_bar:
+    for step in tqdm_bar:
+        # slice relevant quantities at the current step
+        dt_step = dt[:, step].unsqueeze(1)#.unsqueeze(0)
+        y_step = y[:, step].unsqueeze(1)
+        x_step = x[:, step].unsqueeze(1)  # x is constant for the trajectory
+        u_step = u[:, step].unsqueeze(1)  # u is constant for the trajectory
+
+        # Append the observation to the cumulative data
+        cumulative_data.append(((torch.cat((x_step,u_step), dim=-1), dt_step), y_step))
+
+        adapted_params, loss, updates = online_adapt_maml(
+            model=node_model,
+            loss_fn=node_model.loss_fn,
+            data_stream=[((torch.cat((x_step,u_step), dim=-1), dt_step), y_step)],  # single observation
+            lr=lr,
+            use_full_history=False,  # we only use the single observation
+            _params=_adapted_params,  # use the current adapted parameters
+        )
+
+        # Windowed version of maml
+        windowed_data = cumulative_data[-window:] if len(cumulative_data) > window else cumulative_data
+        windowed_adapted_params, windowed_loss, _ = online_adapt_maml(
+            model=node_model,
+            loss_fn=node_model.loss_fn,
+            data_stream=windowed_data,  # last `window` observations
+            lr=lr,
+            use_full_history=True,  # we use all observations in the window
+            _params=_adapted_windowed_params,  # use the current adapted windowed parameters
+        )
+
+        adapted_params_maml_k1, maml_k1_loss  = maml_k1_model.inner_update_step_from_params(
+            x=(torch.cat((x_step,u_step), dim=-1)),
+            dt=dt_step,
+            y=y_step,
+            params=_adapted_params_maml_k1,
+        )
+
+        start = max(0, step - window + 1)
+        adapted_params_maml_k100, maml_k100_loss = maml_k100_model.inner_update_step_from_params(
+            x=(torch.cat((x[:, start:step+1], u[:, start:step+1]), dim=-1)),
+            dt=dt[:, start:step+1],
+            y=y[:, start:step+1],
+            params=_adapted_params_maml_k100,
+        )
+
+        # Compute the basis functions 
+        # [batch_size, n_points, n_features, n_basis]
+        g = model.basis_functions((torch.cat((x_step,u_step), dim=-1), dt_step))
+
+        L = torch.linalg.cholesky(P)
+        coefficients, P = recursive_least_squares_update(
+            method='qr',
+            g=g,
+            y=y_step,
+            P=L,
+            coefficients=coefficients,
+            forgetting_factor=0.95,
+        )
 
 
-            # Compute the basis functions 
-            # [batch_size, n_points, n_features, n_basis]
-            g = model.basis_functions((torch.cat((x_step,u_step), dim=-1), dt_step))
+        # Compute the baseline error
+        pred_baseline = model((torch.cat((x_step, u_step), dim=-1), dt_step), coefficients=coefficients_baseline)
+        loss_baseline = torch.nn.functional.mse_loss(pred_baseline, y_step)
 
-            L = torch.linalg.cholesky(P)
-            coefficients, P = recursive_least_squares_update(
-                method='qr',
-                g=g,
-                y=y_step,
-                P=L,
-                coefficients=coefficients,
-                forgetting_factor=0.95,
-            )
+        # Compute the recursive least squares prediction error
+        pred = model((torch.cat((x_step, u_step), dim=-1), dt_step), coefficients=coefficients)
+        loss_rls = torch.nn.functional.mse_loss(pred, y_step)
 
+        # Compute the neural ODE error
+        node_pred = node_model((torch.cat((x_step, u_step), dim=-1), dt_step))
+        loss_node = torch.nn.functional.mse_loss(node_pred, y_step)
 
-            # Compute the baseline error
-            pred_baseline = model((torch.cat((x_step, u_step), dim=-1), dt_step), coefficients=coefficients_baseline)
-            loss_baseline = torch.nn.functional.mse_loss(pred_baseline, y_step)
+        # Compute the neural ODE prediction error with SGD
+        node_sgd_pred = node_model.forward((torch.cat((x_step,u_step), dim=-1), dt_step), {'params': adapted_params})
+        loss_node_sgd = torch.nn.functional.mse_loss(node_sgd_pred, y_step)
 
-            # Compute the recursive least squares prediction error
-            pred = model((torch.cat((x_step, u_step), dim=-1), dt_step), coefficients=coefficients)
-            loss_rls = torch.nn.functional.mse_loss(pred, y_step)
+        # Compute node predictions with windowed update
+        windowed_node_sgd_pred = node_model.forward((torch.cat((x_step,u_step), dim=-1), dt_step), {'params': windowed_adapted_params})
+        windowed_sgd_loss = torch.nn.functional.mse_loss(windowed_node_sgd_pred, y_step)
 
-            # Compute the neural ODE error
-            node_pred = node_model((torch.cat((x_step, u_step), dim=-1), dt_step))
-            loss_node = torch.nn.functional.mse_loss(node_pred, y_step)
+        # Compute MAML predictions
+        maml_k1_pred = maml_k1_model.forward((torch.cat((x_step, u_step), dim=-1), dt_step), model_kwargs={'params': adapted_params_maml_k1})
+        maml_k1_loss = torch.nn.functional.mse_loss(maml_k1_pred, y_step)
+        maml_k100_pred = maml_k100_model.forward((torch.cat((x_step, u_step), dim=-1), dt_step), model_kwargs={'params': adapted_params_maml_k100})
+        maml_k100_loss = torch.nn.functional.mse_loss(maml_k100_pred, y_step)
 
-            # Compute the neural ODE prediction error with SGD
-            node_sgd_pred = node_model.forward((torch.cat((x_step,u_step), dim=-1), dt_step), {'params': adapted_params})
-            loss_node_sgd = node_model(node_sgd_pred, y_step)
+        baseline_err_med.append(torch.norm(y_step - pred_baseline, dim=-1).median().item())
+        baseline_err_10th.append(torch.norm(y_step - pred_baseline, dim=-1).quantile(0.10).item())
+        baseline_err_90th.append(torch.norm(y_step - pred_baseline, dim=-1).quantile(0.90).item())
 
-            # Compute node predictions with windowed update
-            windowed_node_sgd_pred = model.forward((torch.cat((x_step,u_step), dim=-1), dt_step), {'params': windowed_adapted_params})
-            windowed_sgd_loss = model.loss_function(windowed_node_sgd_pred, y_step)
+        rls_err_med.append(torch.norm(y_step - pred, dim=-1).median().item())
+        rls_err_10th.append(torch.norm(y_step - pred, dim=-1).quantile(0.10).item())
+        rls_err_90th.append(torch.norm(y_step - pred, dim=-1).quantile(0.90).item())
 
-            baseline_err_med.append(torch.norm(y_step - pred_baseline, dim=-1).median().item())
-            baseline_err_10th.append(torch.norm(y_step - pred_baseline, dim=-1).quantile(0.10).item())
-            baseline_err_90th.append(torch.norm(y_step - pred_baseline, dim=-1).quantile(0.90).item())
+        node_err_med.append(torch.norm(y_step - node_pred, dim=-1).median().item())
+        node_err_10th.append(torch.norm(y_step - node_pred, dim=-1).quantile(0.10).item())
+        node_err_90th.append(torch.norm(y_step - node_pred, dim=-1).quantile(0.90).item())
 
-            rls_err_med.append(torch.norm(y_step - pred, dim=-1).median().item())
-            rls_err_10th.append(torch.norm(y_step - pred, dim=-1).quantile(0.10).item())
-            rls_err_90th.append(torch.norm(y_step - pred, dim=-1).quantile(0.90).item())
+        parameter_estimate_norms.append((coefficients - coefficients_baseline).norm(dim=-1).mean().item())
+        parameter_estimate_stds.append((coefficients - coefficients_baseline).norm(dim=-1).std().item())
 
-            node_err_med.append(torch.norm(y_step - node_pred, dim=-1).median().item())
-            node_err_10th.append(torch.norm(y_step - node_pred, dim=-1).quantile(0.10).item())
-            node_err_90th.append(torch.norm(y_step - node_pred, dim=-1).quantile(0.90).item())
+        node_sgd_err_med.append(torch.norm(y_step - node_sgd_pred, dim=-1).median().item())
+        node_sgd_err_10th.append(torch.norm(y_step - node_sgd_pred, dim=-1).quantile(0.10).item())
+        node_sgd_err_90th.append(torch.norm(y_step - node_sgd_pred, dim=-1).quantile(0.90).item())  
 
-            parameter_estimate_norms.append((coefficients - coefficients_baseline).norm(dim=-1).mean().item())
-            parameter_estimate_stds.append((coefficients - coefficients_baseline).norm(dim=-1).std().item())
+        node_sg_windowed_err_med.append(torch.norm(y_step - windowed_node_sgd_pred, dim=-1).median().item())
+        node_sg_windowed_err_10th.append(torch.norm(y_step - windowed_node_sgd_pred, dim=-1).quantile(0.10).item())
+        node_sg_windowed_err_90th.append(torch.norm(y_step - windowed_node_sgd_pred, dim=-1).quantile(0.90).item())
 
-            node_sgd_err_med.append(torch.norm(y_step - node_sgd_pred, dim=-1).median().item())
-            node_sgd_err_10th.append(torch.norm(y_step - node_sgd_pred, dim=-1).quantile(0.10).item())
-            node_sgd_err_90th.append(torch.norm(y_step - node_sgd_pred, dim=-1).quantile(0.90).item())  
+        maml_k1_err_med.append(torch.norm(y_step - maml_k1_pred, dim=-1).median().item())
+        maml_k1_err_10th.append(torch.norm(y_step - maml_k1_pred, dim=-1).quantile(0.10).item())
+        maml_k1_err_90th.append(torch.norm(y_step - maml_k1_pred, dim=-1).quantile(0.90).item())
 
-            node_sg_windowed_err_med.append(torch.norm(y_step - windowed_node_sgd_pred, dim=-1).median().item())
-            node_sg_windowed_err_10th.append(torch.norm(y_step - windowed_node_sgd_pred, dim=-1).quantile(0.10).item())
-            node_sg_windowed_err_90th.append(torch.norm(y_step - windowed_node_sgd_pred, dim=-1).quantile(0.90).item()) 
-        
+        maml_k100_err_med.append(torch.norm(y_step - maml_k100_pred, dim=-1).median().item())
+        maml_k100_err_10th.append(torch.norm(y_step - maml_k100_pred, dim=-1).quantile(0.10).item())
+        maml_k100_err_90th.append(torch.norm(y_step - maml_k100_pred, dim=-1).quantile(0.90).item())
+
+        # set the adapted parameters for the next step
+        _adapted_params = adapted_params.copy()
+        _adapted_windowed_params = windowed_adapted_params.copy()
+
+        _adapted_params_maml_k1 = adapted_params_maml_k1.copy()
+        _adapted_params_maml_k100 = adapted_params_maml_k100.copy()
 
 
 # Use STIX fonts (LaTeX-style) and apply them consistently
@@ -317,7 +383,7 @@ plt.fill_between(
     color="#2ca02c"
 )
 
-plt.plot(node_sgd_err_med, label="NODE-SGD", color="#9467bd")
+plt.plot(node_sgd_err_med, label="NODE-SGD", color="#9467bd", linestyle='--')
 plt.fill_between(
     range(len(node_sgd_err_med)),
     node_sgd_err_10th,
@@ -328,7 +394,7 @@ plt.fill_between(
     color="#9467bd"
 )
 
-plt.plot(node_sg_windowed_err_med, label="NODE-SGD-W", color="#8c564b")
+plt.plot(node_sg_windowed_err_med, label="NODE-SGD-W", color="#8c564b", linestyle=':')
 plt.fill_between(
     range(len(node_sg_windowed_err_med)),
     node_sg_windowed_err_10th,      
@@ -337,6 +403,28 @@ plt.fill_between(
     edgecolor='none',
     linewidth=0.0,  
     color="#8c564b"
+)
+
+plt.plot(maml_k1_err_med, label="MAML-1", color="#e377c2", linestyle='-.')
+plt.fill_between(
+    range(len(maml_k1_err_med)),
+    maml_k1_err_10th,
+    maml_k1_err_90th,
+    alpha=0.2,
+    edgecolor='none',
+    linewidth=0.0,
+    color="#e377c2"
+)
+
+plt.plot(maml_k100_err_med, label="MAML-100", color="#7f7f7f", linestyle=':')
+plt.fill_between(
+    range(len(maml_k100_err_med)),
+    maml_k100_err_10th,
+    maml_k100_err_90th,
+    alpha=0.2,
+    edgecolor='none',
+    linewidth=0.0,
+    color="#7f7f7f"
 )
 
 plt.yscale("log")

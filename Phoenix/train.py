@@ -27,7 +27,8 @@ def load_csv(filepath):
 # Parse command line arguments.
 args = argparse.ArgumentParser()
 args.add_argument("--seed", type=int, default=42)
-args.add_argument("--model", type=str, default="function_encoder")
+# args.add_argument("--model", type=str, default="maml2_node")
+args.add_argument("--model", type=str, default="maml_node")
 args.add_argument("--n_basis", type=int, default=8)
 args.add_argument("--gradsteps", type=int, default=10000)
 args.add_argument("--logdir", type=str, default="logs")
@@ -115,7 +116,7 @@ match args.model:
             integrator=rk4_step,
         ).to(args.device)
         model.loss_fn = neural_ode_loss
-        loss_fn = neural_ode_loss
+        # loss_fn = neural_ode_loss
     case "function_encoder":
         model = FunctionEncoder(basis_functions=BasisFunctions(
                         *[
@@ -127,7 +128,27 @@ match args.model:
                         ]
                     )).to(args.device)
         model.loss_fn = neural_ode_loss
-        loss_fn = neural_ode_loss
+        # loss_fn = neural_ode_loss
+    case "maml2_node":
+        model = MAML2_NODE(
+            NeuralODE(ode_func=ODEFunc(model=MLP(layer_sizes=[9, 128, 128, 6], activation=torch.nn.ReLU(), bias=True)),
+            integrator=rk4_step),
+            meta_learning_rate=1e-3,
+            internal_learning_rate=1e-3
+        ).to(args.device)
+
+        model.loss_fn = neural_ode_loss
+        # loss_fn = neural_ode_loss
+    case "maml_node":
+        model = MAML_NODE(
+            NeuralODE(ode_func=ODEFunc(model=MLP(layer_sizes=[9, 128, 128, 6], activation=torch.nn.ReLU(), bias=True)),
+            integrator=rk4_step),
+            meta_learning_rate=1e-3,
+            internal_learning_rate=1e-3,
+            window_size=100,  # Example window size, adjust as needed
+        ).to(args.device)
+        model.loss_fn = neural_ode_loss
+        # loss_fn = neural_ode_loss
     case _:
         raise ValueError(f"Unknown model type: {args.model_type}")
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -139,6 +160,8 @@ training_data = {
     "interpolation_loss": [],
     "extrapolation_loss": [],
 }
+
+loss_fn = model.loss_fn
 with tqdm.trange(args.gradsteps) as tqdm_bar:
     for grad_step in tqdm_bar:
         # Get the next batch of data.

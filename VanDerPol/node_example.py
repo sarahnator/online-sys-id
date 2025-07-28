@@ -121,7 +121,8 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
     lr = 1e-3
     window = 100  # use a window of 100 steps for the windowed version of maml
 
-    _adapted_params = copy_model_params(model, 1)  # copy the parameters for each task in the batch, this is a placeholder for the first step
+    batch_size = 10
+    _adapted_params = copy_model_params(model, batch_size)  # copy the parameters for each task in the batch
     _adapted_windowed_params = _adapted_params.copy()  # copy the parameters for the windowed version of maml
     with tqdm.trange(trange) as tqdm_bar:
         for step in tqdm_bar:
@@ -133,8 +134,8 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
             mu_t = mu[step]
 
             # Generate a new observation
-            y0 = torch.empty(1, 1, 2, device=device).uniform_(*dataset.y0_range)
-            dt = torch.empty(1, 1, device=device).uniform_(*dataset.dt_range)
+            y0 = torch.empty(batch_size, 1, 2, device=device).uniform_(*dataset.y0_range)
+            dt = torch.empty(batch_size, 1, device=device).uniform_(*dataset.dt_range)
             y1 = rk4_step(van_der_pol, y0, dt, mu=mu_t)
             
             # Append the observation to the cumulative data
@@ -172,8 +173,8 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
 
             # Generate a new batch of data for evaluation
             n_points = 1000
-            _y0 = torch.empty(1, n_points, 2, device=device).uniform_(*dataset.y0_range)
-            _dt = torch.empty(1, n_points, device=device).uniform_(*dataset.dt_range)
+            _y0 = torch.empty(batch_size, n_points, 2, device=device).uniform_(*dataset.y0_range)
+            _dt = torch.empty(batch_size, n_points, device=device).uniform_(*dataset.dt_range)
             _y1 = rk4_step(van_der_pol, _y0, _dt, mu=mu_t)
 
             # Compute node predictions with update on the single observation
@@ -189,16 +190,16 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
             windowed_loss = model.loss_function(windowed_node_pred, _y1)
             
             # Store the losses
-            losses_node.append(loss.item())
+            losses_node.append(loss.mean().item())
             # losses_node_cumulative.append(cumulative_loss.item())
-            losses_node_window.append(windowed_loss.item())
+            losses_node_window.append(windowed_loss.mean().item())
 
 
             tqdm_bar.set_postfix(
                 {
-                    "loss_node": f"{loss.item():.2e}",
+                    "loss_node": f"{loss.mean().item():.2e}",
                     # "loss_node_cumulative": f"{cumulative_loss.item():.2e}",
-                    "loss_node_window": f"{windowed_loss.item():.2e}",
+                    "loss_node_window": f"{windowed_loss.mean().item():.2e}",
                 }
             )
 
@@ -251,9 +252,10 @@ def quantitative_evaluation(mu_function: Callable = mu_piecewise_constant, trang
 
 
 if __name__ == "__main__":
-    qualitative_evaluation()
+    # qualitative_evaluation()
+    quantitative_evaluation(mu_function=mu_constant, trange=5_000)
+
     quantitative_evaluation(mu_function=mu_piecewise_constant, trange=5_000)
     quantitative_evaluation(mu_function=mu_sinusoidal_modulation, trange=5_000)
     quantitative_evaluation(mu_function=mu_linear_ramp, trange=5_000)
-    quantitative_evaluation(mu_function=mu_constant, trange=5_000)
     print("Evaluation completed.")

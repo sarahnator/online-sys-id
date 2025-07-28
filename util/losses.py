@@ -80,13 +80,17 @@ def neural_ode_loss(
     dt_example = dt_example.to(device)
     y1_example = y1_example.to(device)
 
-    try:
+    try: # Function Encoder
         coefficients, G = model.compute_coefficients((y0_example, dt_example), y1_example)
         prediction = model((y0, dt), coefficients=coefficients)
     except Exception as e:
         # print(f"Error in computing coefficients: {e}")
         # prediction = model((y0, dt), y1)
-        prediction = model((y0, dt))
+        try: # Pure Neural ODE
+            prediction = model((y0, dt))
+        except Exception as e: # MAML: we have to call the inner model which is a Neural ODE
+            prediction = model.model((y0, dt))
+            # prediction = model((y0, dt), {}) # also works?
 
     prediction_loss = torch.nn.functional.mse_loss(prediction, y1)
     return prediction_loss

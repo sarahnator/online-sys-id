@@ -785,7 +785,8 @@ class MAML_NODE(MAML2_NODE):
         losses = torch.zeros(n_points, device=x.device)  # to store the losses for each update
         for t in range(n_points): # num updates is equal to the number of points in the time series
             # Continually update the model using all of the data up to time t
-            predictions = self.forward((x[:, -self.window_size:, :], dt[-self.window_size:, :]), model_kwargs={'params': params})
+            # predictions = self.forward((x[:, -self.window_size:, :], dt[-self.window_size:, :]), model_kwargs={'params': params})
+            predictions = self.forward((x[:, -self.window_size:, :], dt), model_kwargs={'params': params})
             loss = self.loss_function(predictions, y[:, -self.window_size:, :])
             losses[t] = loss.item()
             # print(f"Inner update {t+1}/{n_points}, loss: {loss.item():.4f}")
