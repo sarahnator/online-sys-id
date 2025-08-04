@@ -46,3 +46,30 @@ def inertial_to_body(
     # Perform batch matrix-vector multiplication
     xBMat = torch.bmm(R, xIMat.unsqueeze(-1)).squeeze(-1) #+ bIMat # Shape: (N, 3)
     return xBMat
+
+
+def inertial_to_body_XL(
+        bIMat,    # (N, K, 3) matrix of body frame origin vectors in the inertial frame
+        xIMat,    # (N, K, 3) matrix of vectors in the inertial frame
+        device
+):
+    """ Transforms inertial frame vectors into the body frame. """
+
+    # Extract the rotation angles. Ensure separate memory by cloning.
+    yaws = bIMat[:,:,2].clone()  
+
+    cos_yaw = torch.cos(yaws)
+    sin_yaw = torch.sin(yaws)
+    zeros = torch.zeros_like(yaws, device=device)
+    ones = torch.ones_like(yaws, device=device)
+
+    # Construct the batch of rotation matrices
+    R = torch.stack([
+        torch.stack([cos_yaw, sin_yaw, zeros], dim=2),
+        torch.stack([-sin_yaw, cos_yaw, zeros], dim=2),
+        torch.stack([zeros, zeros, ones], dim=2)
+    ], dim=2)  # Shape: (N, K, 3, 3)
+
+    # Perform batch matrix-vector multiplication
+    xBMat = torch.matmul(R, xIMat.unsqueeze(-1)).squeeze(-1)
+    return xBMat

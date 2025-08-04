@@ -167,7 +167,72 @@ class OnlineTestDataset(Dataset):
         info = {}
         return xs, dt, ys, example_xs, example_dt, example_ys, info
 
+class MultiRolloutDataset(IterableDataset):
+    def __init__(
+        self,
+        inputs: List[torch.Tensor],
+        targets: List[torch.Tensor],
+        n_example_points: int,
+        k_steps: int,
+        n_rollouts: int,
+    ):
+        self.inputs = inputs
+        self.targets = targets
+        self.n_example_points = n_example_points
+        self.k_steps = k_steps
+        self.n_rollouts = n_rollouts
 
+    def __iter__(self):
+        while True:
+            # Input/output tensors
+            input_data = self.inputs[0]
+            target_data = self.targets[0]
+            total_window = self.k_steps + self.n_rollouts + 1  # +1 for final x0_n
+
+            # Ensure we have enough space
+            start_idx = torch.randint(input_data.shape[0] - total_window, (1,)).item()
+
+            _xs = input_data[:, 1:]
+            _dt = target_data[:, 0] - input_data[:, 0]
+            _ys = target_data[:, 1:] - _xs[:, :6]
+
+            # Random example points for coeffs init
+            indices = torch.randperm(_xs.shape[0])
+            example_indices = indices[:self.n_example_points]
+            example_xs = _xs[example_indices]
+            example_dt = _dt[example_indices]
+            example_ys = _ys[example_indices]
+
+            # Slice sequential windows for each rollout
+            x0_seq = []     # initial state for each rollout
+            dt_seq = []     # timestep per rollout
+            u_seq = []      # control input per rollout
+            y_seq = []      # target next state per rollout
+
+            for n in range(self.n_rollouts):
+                offset = start_idx + n
+
+                # Initial state for this rollout
+                x0_n = input_data[offset, 1:7]  # [pos, vel]
+                x0_seq.append(x0_n)
+
+                # Sequence of dt, u, y for this rollout
+                dt_n = _dt[offset : offset + self.k_steps]
+                u_n = _xs[offset : offset + self.k_steps, 6:]
+                y_n = target_data[offset : offset + self.k_steps, 1:]
+
+                dt_seq.append(dt_n)
+                u_seq.append(u_n)
+                y_seq.append(y_n)
+
+            # Stack into tensors: shape [N, k, ...]
+            x0_seq = torch.stack(x0_seq)          # [N, 6]
+            dt_seq = torch.stack(dt_seq)          # [N, k]
+            u_seq = torch.stack(u_seq)            # [N, k, 2]
+            y_seq = torch.stack(y_seq)            # [N, k, 6]
+
+            yield x0_seq, dt_seq, u_seq, y_seq, example_xs, example_dt, example_ys
+            
 def load_csv(filepath):
     """
     Load a CSV file and return the data as a tensor.
