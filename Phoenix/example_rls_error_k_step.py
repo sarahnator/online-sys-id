@@ -161,6 +161,17 @@ for seed in seeds:
             # Save the results from this rollout.
             rls_results[seed] = rls_error.cpu().numpy()
 
+    # Initialize the RLS problem.
+    # model_path = f"logs/Phoenix_function_encoder/seed={seed}/function_encoder_model.pth"
+    # rls_model = load_model("function_encoder", device, n_basis, model_path)
+    # P = torch.eye(n_basis, device=device).repeat(1, 1, 1)
+    # coeffs = torch.zeros(batchsize, n_basis, device=device)
+    # rls_error = torch.zeros((batchsize, n_rollouts), device=device)
+    node_sgd_error = torch.zeros((batchsize, n_rollouts), device=device)
+    windowed_node_sgd_error = torch.zeros((batchsize, n_rollouts), device=device)
+    maml_k1_error = torch.zeros((batchsize, n_rollouts), device=device)
+    maml_k100_error = torch.zeros((batchsize, n_rollouts), device=device)
+
     # SGD-based algorithms
     # set the SGD parameters
     cumulative_data = []
@@ -183,6 +194,13 @@ for seed in seeds:
         dt_step = dt_seq[:, i, 0].unsqueeze(1)
         y_step = y_seq[:, i, 0, :].unsqueeze(1) - x_step
 
+        # # Compute new coeffs using RLS update. 
+        # g = rls_model.basis_functions((torch.cat((x_step, u_step), dim=-1), dt_step))
+        # L = torch.linalg.cholesky(P)
+        # coeffs, P = recursive_least_squares_update(
+        #     method='qr', g=g, y=y_step, P=L, coefficients=coeffs, forgetting_factor=0.95
+        # )
+
         # Append the observation to the cumulative data
         cumulative_data.append(((torch.cat((x_step,u_step), dim=-1), dt_step), y_step))
 
@@ -197,7 +215,7 @@ for seed in seeds:
 
         # Windowed version of maml
         windowed_data = cumulative_data[-window:] if len(cumulative_data) > window else cumulative_data
-        windowed_adapted_params, windowed_loss, _ = online_adapt_maml(
+        adapted_windowed_params, windowed_loss, _ = online_adapt_maml(
             model=node_model,
             loss_fn=node_model.loss_fn,
             data_stream=windowed_data,  # last `window` observations
@@ -223,44 +241,44 @@ for seed in seeds:
 
         # Make predictions with the adapted parameters
 
-        _x = x0_seq[:,i,:].clone()
-        _x_node_sgd = _x.clone()
-        _x_windowed_node_sgd = _x.clone()
-        _x_maml_k1 = _x.clone()
-        _x_maml_k100 = _x.clone()
+        # _x = x0_seq[:,i,:].clone()
+        _x_node_sgd = x0_seq[:,i,:].clone()
+        _x_windowed_node_sgd = x0_seq[:,i,:].clone()
+        _x_maml_k1 = x0_seq[:,i,:].clone()
+        _x_maml_k100 = x0_seq[:,i,:].clone()
         for k in range(k_steps):
             
             print(f"seed={seed}, rollout={i}, step={k}")
 
-            # Predict the next state and save the prediction. 
-            del_x = rls_model((torch.cat((_x.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1),
-                                dt_seq[:,i,k].unsqueeze(1)), coefficients=coeffs)
+            # # Predict the next state and save the prediction. 
+            # del_x = rls_model((torch.cat((_x.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1),
+            #                     dt_seq[:,i,k].unsqueeze(1)), coefficients=coeffs)
 
             # Use the adapted parameters to predict the next state.
             # Compute the neural ODE prediction error with SGD
-            node_sgd_del_x = node_model.forward((torch.cat((_x_node_sgd.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_step), {'params': adapted_params})
+            node_sgd_del_x = node_model.forward((torch.cat((_x_node_sgd.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_seq[:,i,k].unsqueeze(1)), {'params': adapted_params})
 
             # Compute node predictions with windowed update
-            windowed_node_sgd_del_x = node_model.forward((torch.cat((_x_windowed_node_sgd.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_step), {'params': windowed_adapted_params})
+            windowed_node_sgd_del_x = node_model.forward((torch.cat((_x_windowed_node_sgd.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_seq[:,i,k].unsqueeze(1)), {'params': adapted_windowed_params})
 
             # Compute MAML predictions
-            maml_k1_del_x = maml_k1_model.forward((torch.cat((_x_maml_k1.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_step), model_kwargs={'params': adapted_params_maml_k1})
-            maml_k100_del_x = maml_k100_model.forward((torch.cat((_x_maml_k100.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_step), model_kwargs={'params': adapted_params_maml_k100})
+            maml_k1_del_x = maml_k1_model.forward((torch.cat((_x_maml_k1.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_seq[:,i,k].unsqueeze(1)), model_kwargs={'params': adapted_params_maml_k1})
+            maml_k100_del_x = maml_k100_model.forward((torch.cat((_x_maml_k100.unsqueeze(1), u_seq[:,i,k,:].unsqueeze(1)), dim=-1), dt_seq[:,i,k].unsqueeze(1)), model_kwargs={'params': adapted_params_maml_k100})
 
             # Get the next velocity in the initial body frame.
-            next_vel_Bi = _x[:,3:6] + del_x[:,:,3:6].squeeze(1)
+            # next_vel_Bi = _x[:,3:6] + del_x[:,:,3:6].squeeze(1)
 
-            next_vel_Bi_node_sgd = _x[:,3:6] + node_sgd_del_x[:,:,3:6].squeeze(1)
-            next_vel_Bi_windowed_node_sgd = _x[:,3:6] + windowed_node_sgd_del_x[:,:,3:6].squeeze(1)
-            next_vel_Bi_maml_k1 = _x[:,3:6] + maml_k1_del_x[:,:,3:6].squeeze(1)
-            next_vel_Bi_maml_k100 = _x[:,3:6] + maml_k100_del_x[:,:,3:6].squeeze(1)
+            next_vel_Bi_node_sgd = _x_node_sgd[:,3:6] + node_sgd_del_x[:,:,3:6].squeeze(1)
+            next_vel_Bi_windowed_node_sgd = _x_windowed_node_sgd[:,3:6] + windowed_node_sgd_del_x[:,:,3:6].squeeze(1)
+            next_vel_Bi_maml_k1 = _x_maml_k1[:,3:6] + maml_k1_del_x[:,:,3:6].squeeze(1)
+            next_vel_Bi_maml_k100 = _x_maml_k100[:,3:6] + maml_k100_del_x[:,:,3:6].squeeze(1)
 
             # Transform the velocity back to the body frame.
-            next_vel_B = inertial_to_body(
-                bIMat=del_x[:,:,:3].squeeze(1),
-                xIMat=next_vel_Bi,
-                device=device
-            )
+            # next_vel_B = inertial_to_body(
+            #     bIMat=del_x[:,:,:3].squeeze(1),
+            #     xIMat=next_vel_Bi,
+            #     device=device
+            # )
 
             next_vel_B_node_sgd = inertial_to_body(
                 bIMat=node_sgd_del_x[:,:,:3].squeeze(1),
@@ -285,7 +303,7 @@ for seed in seeds:
             )
 
             # Prepare the new current state. 
-            _x = torch.cat((torch.zeros((batchsize, 3), device=device), next_vel_B), dim=-1)
+            # _x = torch.cat((torch.zeros((batchsize, 3), device=device), next_vel_B), dim=-1)
 
             _x_node_sgd = torch.cat((torch.zeros((batchsize, 3), device=device), next_vel_B_node_sgd), dim=-1)  
             _x_windowed_node_sgd = torch.cat((torch.zeros((batchsize, 3), device=device), next_vel_B_windowed_node_sgd), dim=-1)
@@ -293,29 +311,28 @@ for seed in seeds:
             _x_maml_k100 = torch.cat((torch.zeros((batchsize, 3), device=device), next_vel_B_maml_k100), dim=-1)    
 
             # Calculate and accumulate the error. 
-            pred = torch.cat((del_x[:,:,:3].squeeze(1), next_vel_Bi), dim=-1)
+            # pred = torch.cat((del_x[:,:,:3].squeeze(1), next_vel_Bi), dim=-1)
 
             pred_node_sgd = torch.cat((node_sgd_del_x[:,:,:3].squeeze(1), next_vel_Bi_node_sgd), dim=-1)
             pred_windowed_node_sgd = torch.cat((windowed_node_sgd_del_x[:,:,:3].squeeze(1), next_vel_Bi_windowed_node_sgd), dim=-1)
             pred_maml_k1 = torch.cat((maml_k1_del_x[:,:,:3].squeeze(1), next_vel_Bi_maml_k1), dim=-1)
             pred_maml_k100 = torch.cat((maml_k100_del_x[:,:,:3].squeeze(1), next_vel_Bi_maml_k100), dim=-1)
-
-            # rls_error[:,i] += torch.nn.functional.mse_loss(pred, y_seq[:,i,k,:])
-            rls_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred, dim=-1)
+            
+            # Accumulate the errors for the RLS method
+            # rls_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred, dim=-1)
 
             # Accumulate the errors for the SGD-based methods
-            node_sgd_error = torch.norm(y_seq[:,i,k,:] - pred_node_sgd, dim=-1)
-            windowed_node_sgd_error = torch.norm(y_seq[:,i,k,:] - pred_windowed_node_sgd, dim=-1)
-            maml_k1_error = torch.norm(y_seq[:,i,k,:] - pred_maml_k1, dim=-1)
-            maml_k100_error = torch.norm(y_seq[:,i,k,:] - pred_maml_k100, dim=-1)
+            node_sgd_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred_node_sgd, dim=-1)
+            windowed_node_sgd_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred_windowed_node_sgd, dim=-1)
+            maml_k1_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred_maml_k1, dim=-1)
+            maml_k100_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred_maml_k100, dim=-1)
 
         # Save the results from this rollout.
         node_sgd_results[seed] = node_sgd_error.cpu().detach().numpy()
         windowed_node_sgd_results[seed] = windowed_node_sgd_error.cpu().detach().numpy()
         maml_k1_results[seed] = maml_k1_error.cpu().detach().numpy()
         maml_k100_results[seed] = maml_k100_error.cpu().detach().numpy()
-
-
+        # rls_results[seed] = rls_error.cpu().detach().numpy()
 
 # Use STIX fonts (LaTeX-style) and apply them consistently
 plt.rcParams.update({
@@ -333,8 +350,9 @@ plt.rcParams.update({
 fig = plt.figure(figsize=(3.5, 2.5))
 colors = {"neural_ode": "#D62728", "function_encoder": "#1F77B4", "rls": "#2ca02c", "node_sgd": "#9467bd", "windowed_node_sgd": "#8c564b", "maml_k1": "#e377c2", "maml_k100": "#7f7f7f"}
 names = {"neural_ode": "Neural ODE", "function_encoder": "Function Encoder", "rls": "FE-RLS", "node_sgd": "Node SGD", "windowed_node_sgd": "Windowed Node SGD", "maml_k1": "MAML-K1", "maml_k100": "MAML-K100"}
-
+linestyles = {"neural_ode": "-", "function_encoder": "--", "rls": "-.", "node_sgd": "-", "windowed_node_sgd": "--", "maml_k1": ":", "maml_k100": "-."}
 for mt in model_types + ["rls", "node_sgd", "windowed_node_sgd", "maml_k1", "maml_k100"]:
+# for mt in ["node_sgd", "windowed_node_sgd", "maml_k1", "maml_k100"]:
     # Collect the final accumulated errors from all seeds and all rollouts
     if mt == "rls":
         errors = np.concatenate([rls_results[seed] for seed in seeds], axis=0)
@@ -355,7 +373,7 @@ for mt in model_types + ["rls", "node_sgd", "windowed_node_sgd", "maml_k1", "mam
     _max = np.percentile(errors, 90, axis=0)
 
     # Plot median, min, and max. 
-    plt.plot(med, label=names[mt], color=colors[mt])
+    plt.plot(med, label=names[mt], color=colors[mt], linestyle=linestyles[mt])
     plt.fill_between(
         np.arange(n_rollouts),
         _min,
