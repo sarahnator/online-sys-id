@@ -176,7 +176,7 @@ for seed in seeds:
     # set the SGD parameters
     cumulative_data = []
     # set the update MAML parameters
-    lr = 1e-3
+    lr = 10
     window = 100  # use a window of 100 steps for the windowed version of maml
     node_model = load_model("neural_ode", device, n_basis, f"logs/Phoenix_neural_ode/seed={seed}/neural_ode_model.pth")
     maml_k1_model = load_model("maml_node", device, n_basis, f"logs/Phoenix_maml_node/seed={seed}/maml_node_model.pth")
@@ -188,6 +188,7 @@ for seed in seeds:
     _adapted_params_maml_k100 = copy_model_params(maml_k100_model.model, batchsize)
 
     for i in range(n_rollouts):
+
         # Get the next point in the RLS update data.
         x_step = x0_seq[:, i, :].unsqueeze(1)
         u_step = u_seq[:, i, 0, :].unsqueeze(1)
@@ -327,12 +328,20 @@ for seed in seeds:
             maml_k1_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred_maml_k1, dim=-1)
             maml_k100_error[:,i] += torch.norm(y_seq[:,i,k,:] - pred_maml_k100, dim=-1)
 
+        # continually update the adapted parameters
+        _adapted_params = adapted_params
+        _adapted_windowed_params = adapted_windowed_params  
+        _adapted_params_maml_k1 = adapted_params_maml_k1
+        _adapted_params_maml_k100 = adapted_params_maml_k100
+
         # Save the results from this rollout.
         node_sgd_results[seed] = node_sgd_error.cpu().detach().numpy()
         windowed_node_sgd_results[seed] = windowed_node_sgd_error.cpu().detach().numpy()
         maml_k1_results[seed] = maml_k1_error.cpu().detach().numpy()
         maml_k100_results[seed] = maml_k100_error.cpu().detach().numpy()
         # rls_results[seed] = rls_error.cpu().detach().numpy()
+
+
 
 # Use STIX fonts (LaTeX-style) and apply them consistently
 plt.rcParams.update({
